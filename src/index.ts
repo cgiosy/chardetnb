@@ -58,6 +58,7 @@ export const detectInto = (
   const len = data.length;
   if (len === 0) return setResult(out, -1, -1, 0, 0);
   const n = sampleLimit > 0 && len > sampleLimit ? sampleLimit : len;
+  const truncated = n < len;
 
   const w16 = n >= 2 ? (data[0] << 8) | data[1] : -1;
   const w32 = n >= 4 ? ((w16 << 16) | (data[2] << 8) | data[3]) >>> 0 : -1;
@@ -73,9 +74,17 @@ export const detectInto = (
     validateUtf32(data, n & ~3, false)
   )
     return setResult(out, ENC_UTF_32LE, -1, 1, 99);
-  if (w16 === 0xfeff && inPool(poolLo, poolHi, ENC_UTF_16BE) && validateUtf16(data, n & ~1, true))
+  if (
+    w16 === 0xfeff &&
+    inPool(poolLo, poolHi, ENC_UTF_16BE) &&
+    validateUtf16(data, n & ~1, true, truncated)
+  )
     return setResult(out, ENC_UTF_16BE, -1, 1, 99);
-  if (w16 === 0xfffe && inPool(poolLo, poolHi, ENC_UTF_16LE) && validateUtf16(data, n & ~1, false))
+  if (
+    w16 === 0xfffe &&
+    inPool(poolLo, poolHi, ENC_UTF_16LE) &&
+    validateUtf16(data, n & ~1, false, truncated)
+  )
     return setResult(out, ENC_UTF_16LE, -1, 1, 99);
 
   countBytes(data, n);
@@ -93,24 +102,26 @@ export const detectInto = (
     if (inPool(poolLo, poolHi, ENC_UTF_8)) return setResult(out, ENC_UTF_8, -1, 1, 99);
   }
   if (hasNul) {
-    if ((n & 3) === 0) {
-      if (inPool(poolLo, poolHi, ENC_UTF_32BE) && validateUtf32(data, n, true))
+    const n32 = truncated ? n & ~3 : n;
+    if ((n32 & 3) === 0 && n32 >= 4) {
+      if (inPool(poolLo, poolHi, ENC_UTF_32BE) && validateUtf32(data, n32, true))
         return setResult(out, ENC_UTF_32BE, -1, 1, 99);
-      if (inPool(poolLo, poolHi, ENC_UTF_32LE) && validateUtf32(data, n, false))
+      if (inPool(poolLo, poolHi, ENC_UTF_32LE) && validateUtf32(data, n32, false))
         return setResult(out, ENC_UTF_32LE, -1, 1, 99);
     }
-    if ((n & 1) === 0) {
-      const [evenNul, oddNul] = nulParity(data, n);
+    const n16 = truncated ? n & ~1 : n;
+    if ((n16 & 1) === 0 && n16 >= 2) {
+      const [evenNul, oddNul] = nulParity(data, n16);
       if (
         evenNul > oddNul * 2 &&
         inPool(poolLo, poolHi, ENC_UTF_16BE) &&
-        validateUtf16(data, n, true)
+        validateUtf16(data, n16, true, truncated)
       )
         return setResult(out, ENC_UTF_16BE, -1, 1, 99);
       if (
         oddNul > evenNul * 2 &&
         inPool(poolLo, poolHi, ENC_UTF_16LE) &&
-        validateUtf16(data, n, false)
+        validateUtf16(data, n16, false, truncated)
       )
         return setResult(out, ENC_UTF_16LE, -1, 1, 99);
     }
@@ -119,9 +130,9 @@ export const detectInto = (
   if (badC0 || hasEsc) return setResult(out, -1, -1, 0, 0);
   let firstHigh = 0;
   while (firstHigh < n && data[firstHigh] < 0x80) firstHigh++;
-  if (inPool(poolLo, poolHi, ENC_UTF_8) && utf8Valid(data, firstHigh, n))
+  if (inPool(poolLo, poolHi, ENC_UTF_8) && utf8Valid(data, firstHigh, n, truncated))
     return setResult(out, ENC_UTF_8, -1, 1, 99);
-  return scoreStatistical(data, n, poolLo, poolHi, firstHigh, out);
+  return scoreStatistical(data, n, poolLo, poolHi, firstHigh, truncated, out);
 };
 
 export const init = (): void => {
@@ -149,6 +160,7 @@ const scoreStatistical = (
   poolLo: number,
   poolHi: number,
   firstHigh: number,
+  truncated: boolean,
   out: Result,
 ): Result => {
   resetCandidates();
@@ -182,13 +194,13 @@ const scoreStatistical = (
   const highTotal = n - asciiTotal;
   if (highTotal * 4 < n) {
     if (nv > 0) scoreSbcs(nv, n);
-    const alive = mbcsPrefix(mv, data, n, highTotal, firstHigh);
-    mbcsComplete(alive, alive, data, n, highTotal);
+    const alive = mbcsPrefix(mv, data, n, highTotal, firstHigh, truncated);
+    mbcsComplete(alive, alive, data, n, highTotal, truncated);
   } else {
-    let alive = mbcsPrefix(mv, data, n, highTotal, firstHigh);
-    alive = mbcsComplete(alive, 1, data, n, highTotal);
+    let alive = mbcsPrefix(mv, data, n, highTotal, firstHigh, truncated);
+    alive = mbcsComplete(alive, 1, data, n, highTotal, truncated);
     if (nv > 0) scoreSbcs(nv, n);
-    mbcsComplete(alive, alive, data, n, highTotal);
+    mbcsComplete(alive, alive, data, n, highTotal, truncated);
   }
   return finish(out);
 };

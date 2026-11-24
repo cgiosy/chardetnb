@@ -3,9 +3,7 @@ export const NUM_MBCS = 6;
 export const NUM_SBCS = 32;
 export const MBCS_OFFSET = 9;
 export const SBCS_OFFSET = 15;
-export const NUM_LANGS = 26;
-export const NUM_LATIN = 15;
-const NUM_MBCS_LANG_MODELS = 8;
+export const NUM_LANGS = 29;
 export const POOL32_LO = 0xffffefff;
 export const POOL32_HI = 0x1;
 export const POOL47_LO = 0xffffffff;
@@ -13,51 +11,50 @@ export const POOL47_HI = 0x7fff;
 export const ENC_NAMES =
   "ASCII,UTF-8,UTF-16BE,UTF-16LE,UTF-32BE,UTF-32LE,ISO-2022-JP,ISO-2022-KR,ISO-2022-CN,Shift_JIS,EUC-JP,EUC-KR,CP949,GB18030,Big5,ISO-8859-1,ISO-8859-2,ISO-8859-5,ISO-8859-6,ISO-8859-7,ISO-8859-8,ISO-8859-9,KOI8-R,windows-874,windows-1250,windows-1251,windows-1252,windows-1253,windows-1254,windows-1255,windows-1256,windows-1257,windows-1258,KOI8-U,IBM866,IBM855,macintosh,x-mac-cyrillic,ISO-8859-3,ISO-8859-4,ISO-8859-10,ISO-8859-13,ISO-8859-14,ISO-8859-15,ISO-8859-16,CP850,CP852";
 export const LANG_NAMES =
-  "en,fr,de,es,cs,pl,ro,mt,lv,lt,et,is,cy,tr,vi,ru,uk,sr,el,ar,he,th,ko,ja,zh-Hans,zh-Hant";
-export const HMUL = "vwt~u6kwkowd%|dzgrV|dzgrV}nlpt'epaonx%";
+  "en,fr,de,es,cs,pl,ro,hu,pt,it,mt,lv,lt,et,is,cy,tr,vi,ru,uk,sr,el,ar,he,th,ko,ja,zh-Hans,zh-Hant";
+export const HMUL = "VfZsl%zevtc+mWVnu)mWVnu)^TUk>TzQi~-";
 export const MBCS_SJIS_CODES =
   "psp+$<t7%%($$%'%%%)'&$$%$&$2'*$$$)$o(%6%2F$+vt(~_y/r5x0|2x:p-s:s(|E";
 export const MBCS_SJIS_LOGP =
-  "fk&]b4#{7|5a+u2dA#c0t-c9n1{9nAeBn)Sl-u4u'z(l=i&f,l%i=n-w2pBb4##k+#j+q'c*r.p/##c*o(n(#a-~,o(";
+  "ug$]$b.#{0m/a(f-S7#r+T*r1n,[2^7t7^'S${)u.U&z&l4X%U)l$i4})h-P8b.##k(#j(Q&r'r*a+##r'o&n&#p)o)o&";
 export const MBCS_EUCKR_CODES =
   "pyo.OC0~.A.w?w4:5y/-MtAw0+-u2y3~5u/0a|/r3Kr.+h/q/$/(%$..:w-%SC%v|($$*t0";
 export const MBCS_EUCKR_LOGP =
-  "fu&l6c4t@y&i0y&z-}>Wt@c*b4c6q&o'd/x*d*e*w0#v0},n'#o)c3~>j&#i:c)}&c*f@j%k%d.k&o(r/e*o2x5g?~Bm?l5f)";
+  "fn${/c.t6j%x+j%Z*n5W$t6r'b.r/b%~%S+X(s't'W,#V,n)}%#_'r-o5Y%#i2R'n%r'f6j$k$d*Z%o&c+t'_-i/v5_8|5[/U'";
 export const MBCS_GB_CODES =
   "|}p+r,&oHtUtn<{{+{+z}+yNxCo{/~G}3P|2y/*7v0H}/Wo5}-u(&o0s4y>q4C{2z1v4{Bt41pcs3Nv.'5s6p>}2Ko2wQ+,<~10-o3w3}1Jo3xs*Awt0";
 export const MBCS_GB_LOGP =
-  "zk'i&b*~,c4b4o(k+j+o1a9o0|Tq:p:#o1|,{RzR~,o(##s.b4c4b4{;l6n(#o(#k+g2~5~,o(m6x*b*y&x0qCv5x0}6z%b4y0x0eEj7x&c4r8m<j+#b4q'q/p9o(";
+  "Z|$X%q'o)c.b.o&k(j(o,p1~+]Dq2p2#o,m){BzBo)o&##s*b.c.b.l3{/n&#o&#k(V-o/o)o&|/X(q'j%X,q8g/X,^0z$b.Y,X,t9j0i%c.c1|3j(#b.Q&b+P2o&";
 export const MBCS_GB_MASK = "#ScddcddddFddd4L9BQdX2";
 export const MBCS_BIG5_CODES =
   "psp-%|R)%0%)%..Q$?s+''/4s)$q+4$?M.|+y,x2<p)u-v/t<p)}.}(*u2v4y1CtK~0p5|Cz1t1},(";
 export const MBCS_BIG5_LOGP =
-  "h~%n0x*d(d'z;c4b4o(o1|6a@n)b4#k+#j+#q'#~,a-{7l<#s8b4c*h&x&{1l6mWj<r/d)x&c*h&x0#c4o(b4##n(##o(";
+  "h_$}+X(d&s%k3c.b.o&o,]0a6^'b.#k(#j(#Q&#o)p){0{3#d1b.r'W%i%{,{/|Ey3c+S'i%r'W%X,#c.o&b.##n&##o&";
 export const MBCS_BIG5_MASK = "d_ddddddddddd>.E#";
 export const buildModel = (): void => {
   const cls = decodeInts(SBCS_CLS, NUM_SBCS * 128, false);
   const featFid = decodeInts(FEAT_FID, NUM_SBCS_FEATS, false);
   const featLogp = decodeInts(FEAT_LOGP, NUM_SBCS_FEATS, true);
-  const latinAscii = decodeInts(LATIN_ASCII_W, NUM_LATIN * 27, true);
-  const meta = decodeInts(LANG_META, NUM_SBCS_LANGS + 2 * NUM_LANGS - NUM_LATIN, true);
+  const meta = decodeInts(LANG_META, NUM_SBCS_LANGS + NUM_LANGS, true);
   SBCS_SCRIPT_A.set(decodeInts(SBCS_SCRIPT, NUM_SBCS, false));
   LANG_SCRIPT_A.set(decodeInts(LANG_SCRIPT, NUM_LANGS, false));
   CANON_RANK_A.set(decodeInts(CANON_RANK, NUM_ENC, false));
-  for (let l = 0; l < NUM_LANGS; l++) {
-    NONASCII_REST[l] = meta[NUM_SBCS_LANGS + l];
-    ASCII_REST[l] =
-      l < NUM_LATIN ? latinAscii[l] : meta[NUM_SBCS_LANGS + NUM_LANGS + l - NUM_LATIN];
-  }
+  for (let l = 0; l < NUM_LANGS; l++) NONASCII_REST[l] = meta[NUM_SBCS_LANGS + l];
   const featW = new Int32Array(NUM_LANGS * 128).fill(FEAT_ABSENT);
+  const zShift = new Int32Array(NUM_LANGS);
   for (let l = 0, p = 0; l < NUM_SBCS_LANGS; l++) {
     let fid = -1;
     let logp = 0;
+    let sNa = 0;
     for (let j = 0; j < meta[l]; j++, p++) {
       fid += featFid[p];
       logp += featLogp[p];
       featW[l * 128 + fid] = logp;
+      sNa += 2 ** (logp / 256);
     }
+    const slots = Math.max(10, SCRIPT_NA_SIZE[LANG_SCRIPT_A[l]] - meta[l]);
+    zShift[l] = Math.round(-Math.log2(sNa + slots * 2 ** (NONASCII_REST[l] / 256) + 1e-3) * 256);
   }
-  AMAX.fill(-32768);
   for (let l = 0; l < NUM_LANGS; l++) {
     const sc = LANG_SCRIPT_A[l];
     const count = SCRIPT_COUNT[sc];
@@ -65,15 +62,6 @@ export const buildModel = (): void => {
     else if (SCRIPT_FIRST[sc] + count !== l)
       throw new Error("languages of a script must be consecutive");
     SCRIPT_COUNT[sc] = count + 1;
-    const rest = ASCII_REST[l];
-    for (let b = 0; b < 128; b++) {
-      const w =
-        l < NUM_LATIN && b >= 0x61 && b <= 0x7a
-          ? rest + latinAscii[NUM_LATIN + l * 26 + b - 0x61]
-          : rest;
-      if (l < NUM_LATIN) AWT[b * 16 + l] = w;
-      AMAX[b] = Math.max(AMAX[b], w);
-    }
   }
   GMAX.fill(-32768);
   let pair = 0;
@@ -89,16 +77,17 @@ export const buildModel = (): void => {
     pairOff[e] = first;
     for (let l = 0; l < NUM_LANGS; l++) {
       if (LANG_SCRIPT_A[l] !== script) continue;
-      const rest = NONASCII_REST[l];
+      const shift = zShift[l];
+      const rest = NONASCII_REST[l] + shift;
       for (let b = 0; b < 128; b++) {
         const c = cls[e * 128 + b];
         let w = OOS;
         if (c === 2) w = rest;
         else if (c >= 3) {
           const fw = featW[l * 128 + c - 3];
-          w = fw !== FEAT_ABSENT ? fw : script !== 0 || c - 3 >= 10 ? rest : OOS;
+          w = fw !== FEAT_ABSENT ? fw + shift : script !== 0 || c - 3 >= 10 ? rest : OOS;
         }
-        pairW[pair * 128 + b] = w;
+        pairW[pair * 128 + b] = w > 0 ? 0 : w;
       }
       pair++;
     }
@@ -138,7 +127,6 @@ export const decodeMask = (src: string, n: number): Uint8Array => {
   return out;
 };
 export const OOS = -6615;
-export const NUM_SCRIPTS = 9;
 export const countBytes = (data: Uint8Array, n: number): void => {
   n = n | 0;
   let i = 0;
@@ -169,10 +157,20 @@ export const countBytes = (data: Uint8Array, n: number): void => {
   }
 };
 export const compactHistogram = (n: number): number => {
-  let a = 0;
+  let controls = 0;
+  for (let b = 0; b < 0x20; b = (b + 1) | 0) {
+    if (hist[b] === 0) continue;
+    hist[b] = 0;
+    controls |= 1 << b;
+  }
+  for (let b = 0x20; b < 0x7f; b = (b + 1) | 0) hist[b] = 0;
+  if (hist[0x7f] !== 0) {
+    hist[0x7f] = 0;
+    controls |= 1 << 31;
+  }
   let h = 0;
-  let total = 0;
-  for (let g = 0; g < 256; g = (g + 8) | 0) {
+  let high = 0;
+  for (let g = 128; g < 256; g = (g + 8) | 0) {
     const any =
       hist[g] |
       hist[g + 1] |
@@ -187,32 +185,15 @@ export const compactHistogram = (n: number): number => {
       const c = hist[b];
       if (c === 0) continue;
       hist[b] = 0;
-      if (b < 0x80) {
-        actA[a] = b;
-        cntA32[a] = c | 0;
-        a = (a + 1) | 0;
-        total += c;
-      } else {
-        actH[h] = b - 0x80;
-        cntH32[h] = c | 0;
-        h = (h + 1) | 0;
-      }
+      actH[h] = b - 0x80;
+      cntH32[h] = c | 0;
+      h = (h + 1) | 0;
+      high += c;
     }
   }
-  nA = a;
   nH = h;
-  asciiTotal = total;
-  let controls = 0;
-  for (let j = 0; j < a; j++) {
-    const b = actA[j];
-    if (b >= 0x20) break;
-    controls |= 1 << b;
-  }
-  if (a > 0 && actA[a - 1] === 0x7f) controls |= 1 << 31;
-  if (n > SBCS_INT_MAX) {
-    cntA.set(cntA32.subarray(0, a));
-    cntH.set(cntH32.subarray(0, h));
-  }
+  asciiTotal = n - high;
+  if (n > SBCS_INT_MAX) cntH.set(cntH32.subarray(0, h));
   return controls;
 };
 export const resetCandidates = (): void => {
@@ -239,59 +220,53 @@ export const pruneThreshold = (): number => {
   return secondLL < t ? secondLL : t;
 };
 export const SBCS_INT_MAX = 262144;
-const CODE_T = 60;
+const NUM_MBCS_LANG_MODELS = 8;
+const NUM_SCRIPTS = 9;
+const NUM_SBCS_LANGS = 25;
+const NUM_SBCS_FEATS = 416;
+const CODE_T = 45;
 const CODE_U = 74;
+const FEAT_ABSENT = 1;
+const SCRIPT_NA_SIZE = Int32Array.of(220, 90, 70, 45, 70, 80);
 const INT_CHARS =
   "#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[]^_abcdefghijklmnopqrstuvwxyz{|}~";
-const LANG_SCRIPT = "###############$$$%'&()*++";
+const LANG_SCRIPT = "##################$$$%'&()*++";
 const SBCS_SCRIPT = "##$'%&#$(#$#%#&'##$$$#$#########";
 const SBCS_CLS =
-  "################################$&$'$$$$$$%0$$$$$$$$$$$$$$%1$$$(%%%%2%%%%%%%%%%%%%%%%%3$%%%%4%56789:;%<=>?@ABCDEFGHIJKL$%MNOPQR%################################$%$%$%%$$%%%%$%%$U$k$%{'$$}'|'o(u($w(v(%%%%2%%%%%%%%%%%%%%%%%3$%%%%4%%6%89T;%V=X?^A_CDYZlnIJ%L$z'q(N%PQ~'$################################$%%%&%'(%%%%%$%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%)*+,-./0123456789:;<=>?@ABCDEFGH$IJ%K%LMNOPQ%$%R################################$###$#######%$#############%###%#&%'%(%)*+,%-./012%34567%89#####$:;<=>?@ABC$$$$$$$$#############################################$%%$$$$$$$%%$$#%$$$$$$%$%%%%%$%%%%%%%%%%%%%%%%%%%%#%%%%%%%%%&'()%*+,-./0123456789:;<=>?@%A%%BCD#################################$#$$$$$$$$$%$$$$$$$$$$$$$$$%$$$################################$&'()*+,-./0123456789:;<=>?@##$$#################################$&$'$$$$$$%0$$$$$$$$$$$$$$%1$$$(%%%%2%%%%%%%%%%%%%%%%%3$%%%%4g%6789:;%<=>?@ABCDEaGHIJKL$%MNOPh|'%$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$I$$$$$$$$$$$$$$$%$$$$$$$$$$$$G)*?-.=,>12345678H9:;</+ED0AFB@C%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%$####$###########%%%%$%%########$&%%'%%()%%%%%%%%%%%*+%,%-./%%0%%123%4%5%%67%8%%9:;%<=%%>?%@%%%$AB%CD%%%E@%%%%%$$$$$$$$$$$%%$$$$)#%#%*$$#$%%%%%%#%r*s*t*$p*q*#$}'%{'o(w(u($$$%$%$$$$%0$$$%$$$k$$$$$U|'1%$%v(%%%%2%%%%%%%%%%%%%%%%%3$%%%%4%%6%89T;%V=X?^A_CDYZlnIJ%L$z'q(N%PQ~'$%%%%%$$$$$%%%%%%J%%%%$%%#$O%P%QR$%%%$%$$%$&%$$$($$'LS$$$I$K%N%%M%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%)*+,-./0123456789:;<=>?@ABCDEFGH)#%%%*$$$$%%%#%##%r*s*t*$p*q*$$}'%y'#w(%$&$'$$$$$$%0$$$$$$$$$$$$$$%1$$$(%%%%2%%%%%%%%%%%%%%%%%3$%%%%4%56789:;%<=>?@ABCDEFGHIJKL$%MNOPQR%$#%$%$$$#$#%#####%%%%$%%#$#%####$$%$$$$$$$#%$$$%$$$$$$$$%%%%%$%%%%%%%%%%%%%%%%%%%%#%%%%%%%%%&'()%*+,-./0123456789:;<=>?@%A%%BCD#)#%%%*$$$$%%%####%r*s*t*$p*q*$$}'%y'##%$&$'$$$$$$%0$$$$$$$$$$$$$$%1$$$(%%%%2%%%%%%%%%%%%%%%%%3$%%%%4g%6789:;%<=>?@ABCDEaGHIJKL$%MNOPh|'%$#%$%$$$$$#%#####%%%%$%%$$#%####$$$$$$$$$$$%$$$$$$$$$$$$$$$%$$$$%%%%%%%%%%#%%%%%$%%%%%%$$#######&'()*+,-./0123456789:;<=>?@##$$#$%%$%$$$$$%%$%%%%%%%%$%%%$%%$$$%$%$$$$$$$$%%$$$$$$$$$$$$$$%%$$$%%&%'%(%)*+,%-./012%3456$7%89$:;<$=$>?@A$$$$$BC$$$$$$$$$$$$$$$$$%)#%#%*$$#$#%#$$$#%r*s*t*$p*q*#$#%#$$#$#$'$#$$%$%0$$$%$$$$$$$$%$%1$$$<%%%%2%%%%%%%%%%%%%%%%%3$%%%%4%%6UfSV;%^[X?u(]ciej}'lmI%KL$r(k{'p(Pv(w($)#%%%*$$$$#%%####%r*s*t*$p*q*$$#%y'##%$&$'$$$$$$%0$$$$$$$$$$$$$$%1$$$(%%%%2%%%%%%%+%%%%%.%%%3$%%%%4%-6789T;%<=>?@A,CDEZG/IJx(L$%MNOPy($%$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$IK$LM$$$$$S$$$$$%&$'($$$$$%$$G)*?-.=,>12345678H9:;</+ED0AFB@C%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%)*+,-./012345678$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$9:;<=>?@ABCDEFGH%I&K(M%%$$$$$$$$J%%%I%K&%%L'M(N%O%P%Q%%%%%R%G%C%)%*%?%-%.%=%,%%%$$$$$>%1%$$$$2%$$$$$$$3%$$$$$$$$4%5%6%7%8$$$$%H$%9%:%;%<%/%+%E%$$D%0%A%F%B%@%$$$2%%%%34879;:%=?>@ACBDEGIHJLKNMOP$$$'$$$6$$$$$$%%$$$$$$$$$$$%%$<%(&$$%$$01*$%%%%y'p*q*s*t*%r*$$%%$)%%%%$$%%$%%%%%%%%%%%#%%%%h$$$$$$$$$$%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%$$%$$$$'$$$%J$%%$$$$L$S%&K(M%O%PN%$$$$$%%$$%Q%%%%%%%%%$%%%%R$%IH)*+,-./0123456789:;<=>?@ABCDEFG$################################$%$'$#%$$g%%%$#%$d$$$$%$$h|'a%$#v(%%%#2%%%%%%%%%%%#%%%%%3$%%%%4%%6789#;W%=>?@ABCDE#GHIJbL$%MNOP%%$################################$%%%$%%$$%%%%$%$$U$%$%j$$}'[c%%w(%%%%%2%%%%%%%%%%%%%%%%%3$%%%%4%%6S89:;%<fX?^A]CDeZm%iJKL$%r(NOP%p($################################$%%%%%%$%%%%%$%%$U[ce%i$jZ}'%w(%p(%%%%%2%%%%%%%%%%%%%%%%%3%%%%%4%56S89:;%<fX?^A]CDEFm%IJKL%%r(NOPQR%################################$t*$'$%$$%$%0$$$%$$$$s*$$$%$%1$$$<%%%%2%%%%%%%%%%%%%%%%%3$%%%%4%%6UfSV;%^[X?u(]ciej}'lmI%KL$r(k{'p(Pv(w(r*################################$%%'%W%$%$%%%$$%%%%b%%$%%%%%%%%%%%%%2%%%%%%%%%%%%%%%%%3%%%%%4%%6789:;%<=>?@ABCDEs(GHIJKL%%MNOPQt(%################################$&$')$%$}'$%0$$$$$$$$%$$$w($%1%y'%(%%%%2%%%%%%%%%%%%%%%%%3$%%%%4%56789:;%<=>?@ABCDEFGHIJKL$%MNOPQR%################################$%U%)%%$}'$%0%$u(%$$%k%t*$$w(Xz(1%y'%v(%%%%2%%%%%%%%%%%%%%%%%3%%%%%4%%6789T;V<=>?@ABCDEZlHIJ%L{'%MNOP^{(%%P?9;7%=@A>EDB2%%<%JLHOM%34%'%$%8CING%%%($$$$&01$$$$$%%%$$$$$$$$$$$$$$:%$$$$$$$$F%%%%h%%%$$$$$%$%6%%K%$R5%%%Q%$$$$$$$$$$$$$$$$$$%P?9;q(V=kA%%D%2%%%%JL%%%{'34%o(%$X8CIN%U%w(%^$u(%|'01$$$$$%%%%$$$$%v($$$$$$$%T$$$$$$$$Z%%%Y%%%_$$$$%%$%6%%ln%}'%%%%Q%~'$$$$$$$$$$$$%%z'$$";
+  "################################$&$'$$$$$$%0$$$$$$$$$$$$$$%1$$$(%%%%2%%%%%%%%%%%%%%%%%3$%%%%4%56789:;%<=>?@ABCDEFGHIJKL$%MNOPQR%################################$%$%$%%$$%%%%$%%$U$k$%|'$$~'}'p(w($y(x(%%%%2%%%%%%%%%%%%%%%%%3$%%%%4%%6%89T;%V=X?^A_CDYZlnIJy'L${'r(Ns(PQo($################################$%%%&%'(%%%%%$%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%)*+,-./0123456789:;<=>?@ABCDEFGH$IJ%K%LMNOPQ%$%R################################$###$#######%$#############%###%#&%'%(%)*+,%-./012%34567%89#####$:;<=>?@ABC$$$$$$$$#############################################$%%$$$$$$$%%$$#%$$$$$$%$%%%%%$%%%%%%%%%%%%%%%%%%%%#%%%%%%%%%&'()%*+,-./0123456789:;<=>?@%A%%BCD#################################$#$$$$$$$$$%$$$$$$$$$$$$$$$%$$$################################$&'()*+,-./0123456789:;<=>?@##$$#################################$&$'$$$$$$%0$$$$$$$$$$$$$$%1$$$(%%%%2%%%%%%%%%%%%%%%%%3$%%%%4g%6789:;%<=>?@ABCDEaGHIJKL$%MNOPh}'%$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$I$$$$$$$$$$$$$$$%$$$$$$$$$$$$G)*?-.=,>12345678H9:;</+ED0AFB@C%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%$####$###########%%%%$%%########$&%%'%%()%%%%%%%%%%%*+%,%-./%%0%%123%4%5%%67%8%%9:;%<=%%>?%@%%%$AB%CD%%%E@%%%%%$$$$$$$$$$$%%$$$$)#%#%*$$#$%%%%%%#%t*u*v*$r*s*#$~'%|'p(y(w($$$%$%$$$$%0$$$%$$$k$$$$$U}'1%$%x(%%%%2%%%%%%%%%%%%%%%%%3$%%%%4%%6%89T;%V=X?^A_CDYZlnIJy'L${'r(Ns(PQo($%%%%%$$$$$%%%%%%J%%%%$%%#$O%P%QR$%%%$%$$%$&%$$$($$'LS$$$I$K%N%%M%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%)*+,-./0123456789:;<=>?@ABCDEFGH)#%%%*$$$$%%%#%##%t*u*v*$r*s*$$~'%z'#y(%$&$'$$$$$$%0$$$$$$$$$$$$$$%1$$$(%%%%2%%%%%%%%%%%%%%%%%3$%%%%4%56789:;%<=>?@ABCDEFGHIJKL$%MNOPQR%$#%$%$$$#$#%#####%%%%$%%#$#%####$$%$$$$$$$#%$$$%$$$$$$$$%%%%%$%%%%%%%%%%%%%%%%%%%%#%%%%%%%%%&'()%*+,-./0123456789:;<=>?@%A%%BCD#)#%%%*$$$$%%%####%t*u*v*$r*s*$$~'%z'##%$&$'$$$$$$%0$$$$$$$$$$$$$$%1$$$(%%%%2%%%%%%%%%%%%%%%%%3$%%%%4g%6789:;%<=>?@ABCDEaGHIJKL$%MNOPh}'%$#%$%$$$$$#%#####%%%%$%%$$#%####$$$$$$$$$$$%$$$$$$$$$$$$$$$%$$$$%%%%%%%%%%#%%%%%$%%%%%%$$#######&'()*+,-./0123456789:;<=>?@##$$#$%%$%$$$$$%%$%%%%%%%%$%%%$%%$$$%$%$$$$$$$$%%$$$$$$$$$$$$$$%%$$$%%&%'%(%)*+,%-./012%3456$7%89$:;<$=$>?@A$$$$$BC$$$$$$$$$$$$$$$$$%)#%#%*$$#$#%#$$$#%t*u*v*$r*s*#$#%#$$#$#$'$#$$%$%0$$$%$$$$$$$$%$%1$$$<%%%%2%%%%%%%%%%%%%%%%%3$%%%%4%%6UfSV;%^[X?w(]ciej~'lmI%KL$t(k|'q(Px(y($)#%%%*$$$$#%%####%t*u*v*$r*s*$$#%z'##%$&$'$$$$$$%0$$$$$$$$$$$$$$%1$$$(%%%%2%%%%%%%+%%%%%.%%%3$%%%%4%-6789T;%<=>?@A,CDEZG/IJz(L$%MNOP{($%$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$IK$LM$$$$$S$$$$$%&$'($$$$$%$$G)*?-.=,>12345678H9:;</+ED0AFB@C%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%)*+,-./012345678$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$9:;<=>?@ABCDEFGH%I&K(M%%$$$$$$$$J%%%I%K&%%L'M(N%O%P%Q%%%%%R%G%C%)%*%?%-%.%=%,%%%$$$$$>%1%$$$$2%$$$$$$$3%$$$$$$$$4%5%6%7%8$$$$%H$%9%:%;%<%/%+%E%$$D%0%A%F%B%@%$$$2%%%%34879;:%=?>@ACBDEGIHJLKNMOP$$$'$$$6$$$$$$%%$$$$$$$$$$$%%$<%(&$$%$$01*$%%%%z'r*s*u*v*%t*$$%%$)%%%%$$%%$%%%%%%%%%%%#%%%%h$$$$$$$$$$%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%$$%$$$$'$$$%J$%%$$$$L$S%&K(M%O%PN%$$$$$%%$$%Q%%%%%%%%%$%%%%R$%IH)*+,-./0123456789:;<=>?@ABCDEFG$################################$%$'$#%$$g%%%$#%$d$$$$%$$h}'a%$#x(%%%#2%%%%%%%%%%%#%%%%%3$%%%%4%%6789#;W%=>?@ABCDE#GHIJbL$%MNOP%%$################################$%%%$%%$$%%%%$%$$U$%$%j$$~'[c%%y(%%%%%2%%%%%%%%%%%%%%%%%3$%%%%4%%6S89:;%<fX?^A]CDeZm%iJKL$%t(NOP%q($################################$%%%%%%$%%%%%$%%$U[ce%i$jZ~'%y(%q(%%%%%2%%%%%%%%%%%%%%%%%3%%%%%4%56S89:;%<fX?^A]CDEFm%IJKL%%t(NOPQR%################################$v*$'$%$$%$%0$$$%$$$$u*$$$%$%1$$$<%%%%2%%%%%%%%%%%%%%%%%3$%%%%4%%6UfSV;%^[X?w(]ciej~'lmI%KL$t(k|'q(Px(y(t*################################$%%'%W%$%$%%%$$%%%%b%%$%%%%%%%%%%%%%2%%%%%%%%%%%%%%%%%3%%%%%4%%6789:;%<=>?@ABCDEu(GHIJKL%%MNOPQv(%################################$&$')$%$~'$%0$$$$$$$$%$$$y($%1%z'%(%%%%2%%%%%%%%%%%%%%%%%3$%%%%4%56789:;%<=>?@ABCDEFGHIJKL$%MNOPQR%################################$%U%)%%$~'$%0%$w(%$$%k%v*$$y(X|(1%z'%x(%%%%2%%%%%%%%%%%%%%%%%3%%%%%4%%6789T;V<=>?@ABCDEZlHIJy'L|'s(MNOP^}(%%P?9;7%=@A>EDB2%%<%JLHOM%34%'%$%8CING%%%($$$$&01$$$$$%%%$$$$$$$$$$$$$$:%$$$$$$$$F%%%%h%%%$$$$$%$%6%%K%$R5%%%Q%$$$$$$$$$$$$$$$$$$%P?9;r(V=kA%y'D%2%%%%JL%%%|'34%p(%$X8CIN%U%y(%^$w(%}'01$$$$$%%%%$$$$%x($$$$$$$%T$$$$$$$$Z%%%Y%%%_$$$$%%$%6%%ln%~'%%%%Q%o($$$$$$$$$$$$s(%{'$$";
 const FEAT_FID =
-  "%%$y)$$$$'*$)%'$$$$&$(&%A',$$%(4'$%$2*''%(%6*'.&*$(1%&%%)G/$*/$(-$7.3?%/$5*')(-,%;Q(&)%'$&)&*S&'$*0&%(93$'D-3&'&'&&&%&$7*'$((K$;2'2)$-)$$$$+$$$)%$*&$))E$&$$$$$$$$$$$$$$$$$$$'$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$&%$&$$)'$$$$$$$$%$$$$$$$$$%$$$,'$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$";
+  "%%${)$$$$'*$)%'$$$$&$(&%B',$$%(4'$%$2*''%(%6*'.&*$(1&&%%*G/$*/$).$7.3@%0$6*')&%%@-5$$$&%$&)%&5*$&)(5*')(-,%=Q(&)%'$&*&+S&'$*1&&(93$'E.3&'&'&&&%&$7*'$((M$;2'2)$.)$$$$+$$$)%$*&$))G$&$$$$$$$$$$$$$$$$$$$'$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$&%$&$$)'$$$$$$$$%$$$$$$$$$%$$$,'$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$";
 const FEAT_LOGP =
-  "bu)#c*a-c*c?b5#nv)c4#gc%t[c4yAuLbXb_s9r9eEb*n'p(v{)c>~,c4kGi2|.i8po)o(p9it%v&u/v7{;tJtWbj&|/}9rv%gW#ht%ya&vn%ug%n+xj%gd%s-nx&a'r9};e/dYm@fZ{a%d{&a'u?vPn(qCt*xr'~,b4##eOq/o1b4zw%tf%gRx_gb%jKy+o'}1x*b4xw&n1qBpBq8a%b6}1z*dh&[~>u6vn%r/tn(eb%z4f*g9{;nGd)~(b;kPla'f1d)lGoXl<q:b'ts&v,i8d/dHgo%z<bn&e&b?a-s/r%#p'p9q9n2#o2p9#c4}1|'#f)z-c*n'r/}1d.y+p(p.q8n'p(b*a-~,c*h&h+q.hk%xJ{<f;y0u<bY{0yGnOc=w(v*c5e/pD{/q&k&l8|[oCj4a>t3n4bYcf&f%tLc4g?ng&xu)ePdPol'vLqBrAe3a-|Pu=y=xJ{?.p)c8s)d@e3n'Cn+jb%gFt2i2z.t6}Mt:w>tD{^xLrv%|b%rS}8l7e6k8jc%s;sJz:f)Uu5}+v=q1JNd&bTc*a/n)t@ug%rJf)x&dOhr&p'p&q&}Rld%a7NiGzl%yYv>oOd3l+m)s2pd%ah%x2Y4k'}-~5bHy0i&#j7x&zy'kIl?it%vAl's)d?c*t6g<b?cOb2h2x&h0y+qDdQyIt(DwKh0j%d<q<nKeQ|q%d(rAk2k@i&rZc4|/uX|i%eE}:x;s8bGc>r9}1~^uQt[{Ri/{8|(y)xt%l7c4j7i0n'y&k3v=c%n(i5Fy-v5a)r&d'y5~Ei<c3h;y'd7p(c4q6~>r5a7c+";
-const LATIN_ASCII_W =
-  "hq'|r'bs'bs'lv'zt'nv'vt'~v'fw'tu'jw'pt'tv'd~'}i%e>oMcXwt%qGgEub%cf%p@u.iVwIae%wg%}CpJib%oc%ql%oMe4wIp@gEjSmi%{2{RuUuy%y7{2u,ci%M#oa%qPwg%aa%qPw=}e%kj%ch%yd%cA#b'f.h?we%mEoQw^o|%uBuPi]gi%r0e:wSgLyo%gLe0#qg%qh%qd%cZy,mE##}7su%u=q[ec%{w%s,m5s,kd%d'#c^cRif%ul%aLy2}f%sj%a[}Vy2##y2Koi%eFeFcZyn%##aAo_yLwZm[gWsj%yq%uX#wZqa%mg%mVsb%##kJ}Mko%qAuY}Tyk%#y?{9km%cLmVyI{Pqc%el%mS#s^o[uYcN#e^#mX}c%at%s;{c%yXgw%y=s;#ot%##k_eUmi%k_uV#gk%w^yg%sf%w?###y3ms%mM#oSqf%iJgP#au%uFuUmk%o_}f%{[}Ge?we%m]ch%gZ#mBy@##cx%}C#eTqm%#mH#qr%oOc]yXyZoa%cXaU#{e%sp%ch%qb%iS###aKkw%yC#iRif%#iH#az%iMe^oVuXke%ij%cT#}g%so%uf%}c%mP####wv%}9#}Zcu%#mGuDaq%cFg_qc%cYeb%o[cL#oXmm%el%ie%cO####av%c;#uFyj%eVm_{Jao%m=oXeb%g^ko%oN##cr%og%wd%ub%uP####es%eDqV{f%{j%qQaYqTih%##k^gMgm%sd%u?#sg%ySkRaO#ga%#ml%#ix%uRk9ma%eq%#w?y=ip%#ma%ag%gZ}l%{Ow6#ej%kTuV}Uk9##uViCee%uIuh%kFcH#am%ur%si%#eOsSwZg|%gb%qL#mWcHsl%}_sS####";
+  "b}%#r'p)r'r5Q/#^~%c.#gLtHc.j7u>bFbJS2R2t9q'}%p&vR&R5o)c.Z;X-|*X1py%o&P2xW$g%f+v0l3e=TFQg$m+^2cY$vE#wW$ja$VT$fOn(iQ$VMS*np$p%R2n3T+SGm6uGlKdr$p%U6gAn&q8T(W[$L}AR'p'h<x7Y(oCch%]CU?bEZ(]*n'c7s0RDc.co$u1Q;n)t'q(xQ%o)b.##e@b+o,b.ZZ$tNgBxJvKy=y(~%},X(b.Xp$n,Q8P8b1a$q/},Z(se$[$o5U0VT$c+Te%tKz.u'v1l3^;S'~&Q3ZA[u$f,S'[;oF{3q2q%em$g)X1S+s;gT$Z4qi$T%q5p)d+r$#P&P2Q2^-#_-P2#c.},]&#U'Z*r'}%c+},d*y(p&p*b1}%p&q'p)o)r'W%h(q*wQ$i=[4U3Y,U4QG[,j;n@c4w&V(R/T+a9l+b%Z%[1|Ho8j.P5T.n.QGcd$f$t>c.v5^e$x}%TASAo|$v>Q8c7t-p)mAu4y4i=[6.a'R1d'd6t-}%Cn(yKg:e-X-z*T0n?t2h5e9[Jx>cY$]LcCn1l0t/Z1jLd3d=z2U'U$f/}(v4q,JNS%qCr'P+^'t6fOc=U'i%d@hl$P&a%b%}B[Ma0NX;zR$jGg5o@s-l(]'d-aMpOi-Y$4z%^*o/q;Y,X%#j0i%kV%k<{5xW$g7{%d's5r'T0v3q5c@Q-W-i%w+y(b9sAy<t&DW>w+j$s3Q4}=tA]V$d&c7Z-k6X%RHc.m+uF|P$t9}2i3d1Q;R5R2},_JUBtH{BX+l1|&j'XX$l0c.j0x+}%j%z-v4c$n&X/FY*g/P'c%s%j/_:x3r-W3Y&d0p&c.Q0o5c/a0c(";
 const LANG_META =
-  "3C37?51595/931s%g%m%^c%a%Ye%~w+ft+tw+nw+h}*zh+pf+bo+ra+|c+lo+r}*rw+h|*lb*xl(nk(nn(nc(dd(nn'dg(|c*tt*xt*xt*~z'~z'~z'~z'~z'~z'dd(nu'pi(pi(pi(";
+  "3C37?5159/595/931s$g$m$^$c$a$Y$e$_z&uw&Tz&}y&wi&Zp&pn&|l&Xx&_z&bt&ck&|l&lt&Rj&Rz&Wi&{U&xc%}b%}d%n[%S]%}}$S_%|V&Td&Xd&Xd&";
 const CANON_RANK = "#$&%(')*+FECDGH,/4<8:>2B01-9?;=@A356K7LMNOP.QIJ";
 // Shared records are destructured into module-private consts by hot modules; V8 reloads exported or imported bindings through a cell on every access.
 const SBCS_SCRIPT_A = new Uint8Array(NUM_SBCS);
 const LANG_SCRIPT_A = new Uint8Array(NUM_LANGS);
 const CANON_RANK_A = new Uint8Array(NUM_ENC);
-const ASCII_REST = new Int32Array(NUM_LANGS);
 const NONASCII_REST = new Int32Array(NUM_LANGS);
 const SCRIPT_FIRST = new Int32Array(NUM_SCRIPTS);
 const SCRIPT_COUNT = new Int32Array(NUM_SCRIPTS);
 const SBCS_INVALID = new Int32Array(NUM_SBCS * 4);
 const pairOff = new Uint16Array(NUM_SBCS);
-const pairW = new Int16Array(360 * 128);
-const AWT = new Int16Array(128 * 16);
-const AMAX = new Int16Array(128);
+const pairW = new Int16Array(420 * 128);
 const WMAXT = new Int16Array(128 * NUM_SBCS);
 const GMAX = new Int16Array(128);
 const SBCS_KEY = new Int32Array(NUM_SBCS * 128);
 export const model = {
   SBCS_SCRIPT: SBCS_SCRIPT_A,
-  LANG_SCRIPT: LANG_SCRIPT_A,
   CANON_RANK: CANON_RANK_A,
-  ASCII_REST,
   NONASCII_REST,
   SCRIPT_FIRST,
   SCRIPT_COUNT,
   SBCS_INVALID,
   pairOff,
   pairW,
-  AWT,
-  AMAX,
   WMAXT,
   GMAX,
   SBCS_KEY,
 };
-const NUM_SBCS_LANGS = 22;
-const NUM_SBCS_FEATS = 390;
-const FEAT_ABSENT = 1;
 const ICODE = Int8Array.from({ length: 128 }, (_, c) => INT_CHARS.indexOf(String.fromCharCode(c)));
 const HCAP = 8192;
 const HSHIFT = 23;
@@ -303,8 +278,7 @@ const NATW = new Uint16Array(NUM_MBCS * 256);
 const TRAIL_CLASS = new Uint8Array(NUM_MBCS * 256);
 const CP949_HITRAIL = new Uint8Array(256);
 const MODEL_FIRST = Int32Array.of(0, 1, 2, 3, 4, 6, 8);
-const MODEL_LANG = Int32Array.of(23, 23, 22, 22, 24, 25, 25, 24);
-const MODEL_ASCII_W = new Int32Array(NUM_MBCS_LANG_MODELS);
+const MODEL_LANG = Int32Array.of(26, 26, 25, 25, 27, 28, 28, 27);
 const MODEL_NATIVE_W = new Int32Array(NUM_MBCS_LANG_MODELS);
 const MBCS_MAX_CHAR_W = new Float64Array(NUM_MBCS_LANG_MODELS);
 const MBCS_INVALID = new Int32Array(NUM_MBCS * 4);
@@ -319,14 +293,10 @@ export const mbcsModel = {
   CP949_HITRAIL,
   MODEL_FIRST,
   MODEL_LANG,
-  MODEL_ASCII_W,
   MODEL_NATIVE_W,
   MBCS_MAX_CHAR_W,
   MBCS_INVALID,
 };
-const actA = new Uint8Array(128);
-const cntA = new Float64Array(128);
-const cntA32 = new Int32Array(128);
 const actH = new Uint8Array(128);
 const cntH = new Float64Array(128);
 const cntH32 = new Int32Array(128);
@@ -343,9 +313,6 @@ const mbcsRate = new Float64Array(NUM_MBCS);
 const mbcsOrder = new Int32Array(NUM_MBCS);
 const sbcsOrder = new Int32Array(NUM_SBCS);
 export const scratch = {
-  actA,
-  cntA,
-  cntA32,
   actH,
   cntH,
   cntH32,
@@ -362,9 +329,8 @@ export const scratch = {
   mbcsOrder,
   sbcsOrder,
 };
-export let nA = 0;
+const hist = new Uint32Array(256);
 export let nH = 0;
 export let asciiTotal = 0;
-const hist = new Uint32Array(256);
 let bestLL = -Infinity;
 let secondLL = -Infinity;

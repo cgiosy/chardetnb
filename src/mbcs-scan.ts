@@ -6,24 +6,31 @@ export const scanMbcs = (
   i: number,
   stop: number,
   n: number,
+  truncated: boolean,
 ): number => {
   switch (m) {
     case M_SJIS:
-      return scanSjis(data, i, stop, n);
+      return scanSjis(data, i, stop, n, truncated);
     case M_EUCJP:
-      return scanEucJp(data, i, stop, n);
+      return scanEucJp(data, i, stop, n, truncated);
     case M_EUCKR:
-      return scanEucKr(data, i, stop, n);
+      return scanEucKr(data, i, stop, n, truncated);
     case M_CP949:
-      return scanCp949(data, i, stop, n);
+      return scanCp949(data, i, stop, n, truncated);
     case M_GB18030:
-      return scanGb18030(data, i, stop, n);
+      return scanGb18030(data, i, stop, n, truncated);
     default:
-      return scanBig5(data, i, stop, n);
+      return scanBig5(data, i, stop, n, truncated);
   }
 };
 
-const scanSjis = (data: Uint8Array, i: number, stop: number, n: number): number => {
+const scanSjis = (
+  data: Uint8Array,
+  i: number,
+  stop: number,
+  n: number,
+  truncated: boolean,
+): number => {
   i = i | 0;
   stop = stop | 0;
   n = n | 0;
@@ -47,8 +54,13 @@ const scanSjis = (data: Uint8Array, i: number, stop: number, n: number): number 
       i = (i + 1) | 0;
       continue;
     }
-    if (!((b0 >= 0x81 && b0 <= 0x9f) || (b0 >= 0xe0 && b0 <= 0xef)) || ((i + 1) | 0) >= n)
-      return -1;
+    if (!((b0 >= 0x81 && b0 <= 0x9f) || (b0 >= 0xe0 && b0 <= 0xfc))) return -1;
+    if (((i + 1) | 0) >= n) {
+      if (!truncated) return -1;
+      extra = (extra + 1) | 0;
+      i = n;
+      break;
+    }
     const b1 = data[(i + 1) | 0];
     const tc = TRAIL_CLASS[M_SJIS * 256 + b1];
     if ((tc & 1) === 0) return -1;
@@ -65,7 +77,13 @@ const scanSjis = (data: Uint8Array, i: number, stop: number, n: number): number 
   return i;
 };
 
-const scanEucJp = (data: Uint8Array, i: number, stop: number, n: number): number => {
+const scanEucJp = (
+  data: Uint8Array,
+  i: number,
+  stop: number,
+  n: number,
+  truncated: boolean,
+): number => {
   i = i | 0;
   stop = stop | 0;
   n = n | 0;
@@ -82,7 +100,12 @@ const scanEucJp = (data: Uint8Array, i: number, stop: number, n: number): number
       continue;
     }
     if (b0 >= 0xa1 && b0 <= 0xfe) {
-      if (((i + 1) | 0) >= n) return -1;
+      if (((i + 1) | 0) >= n) {
+        if (!truncated) return -1;
+        extra = (extra + 1) | 0;
+        i = n;
+        break;
+      }
       const b1 = data[(i + 1) | 0];
       if (b1 < 0xa1 || b1 > 0xfe) return -1;
       const nw = NATW[M_EUCJP * 256 + b0];
@@ -93,14 +116,25 @@ const scanEucJp = (data: Uint8Array, i: number, stop: number, n: number): number
       d0 = (d0 + (((kv << 16) >> 16) & ((((kv >>> 16) ^ code) - 1) >> 31))) | 0;
       i = (i + 2) | 0;
     } else if (b0 === 0x8e) {
-      if (((i + 1) | 0) >= n) return -1;
+      if (((i + 1) | 0) >= n) {
+        if (!truncated) return -1;
+        extra = (extra + 1) | 0;
+        i = n;
+        break;
+      }
       const b1 = data[(i + 1) | 0];
       if (b1 < 0xa1 || b1 > 0xdf) return -1;
       nat = (nat + 1) | 0;
       chars = (chars + 1) | 0;
       i = (i + 2) | 0;
     } else if (b0 === 0x8f) {
-      if (((i + 2) | 0) >= n) return -1;
+      if (((i + 2) | 0) >= n) {
+        if (!truncated) return -1;
+        if (((i + 1) | 0) < n && (data[(i + 1) | 0] < 0xa1 || data[(i + 1) | 0] > 0xfe)) return -1;
+        extra = (extra + n - i) | 0;
+        i = n;
+        break;
+      }
       const b1 = data[(i + 1) | 0];
       const b2 = data[(i + 2) | 0];
       if (b1 < 0xa1 || b1 > 0xfe || b2 < 0xa1 || b2 > 0xfe) return -1;
@@ -114,7 +148,13 @@ const scanEucJp = (data: Uint8Array, i: number, stop: number, n: number): number
   return i;
 };
 
-const scanEucKr = (data: Uint8Array, i: number, stop: number, n: number): number => {
+const scanEucKr = (
+  data: Uint8Array,
+  i: number,
+  stop: number,
+  n: number,
+  truncated: boolean,
+): number => {
   i = i | 0;
   stop = stop | 0;
   n = n | 0;
@@ -122,14 +162,21 @@ const scanEucKr = (data: Uint8Array, i: number, stop: number, n: number): number
   const mul = HMUL[M_EUCKR];
   let nat = 0,
     chars = 0,
-    d0 = 0;
+    d0 = 0,
+    extra = 0;
   while (i < stop) {
     const b0 = data[i];
     if (b0 < 0x80) {
       i = (i + 1) | 0;
       continue;
     }
-    if (b0 < 0xa1 || b0 === 0xc9 || b0 >= 0xfe || ((i + 1) | 0) >= n) return -1;
+    if (b0 < 0xa1 || b0 === 0xc9 || b0 >= 0xfe) return -1;
+    if (((i + 1) | 0) >= n) {
+      if (!truncated) return -1;
+      extra = (extra + 1) | 0;
+      i = n;
+      break;
+    }
     const b1 = data[(i + 1) | 0];
     if (b1 < 0xa1 || b1 > 0xfe) return -1;
     const nw = NATW[M_EUCKR * 256 + b0];
@@ -140,11 +187,17 @@ const scanEucKr = (data: Uint8Array, i: number, stop: number, n: number): number
     d0 = (d0 + (((kv << 16) >> 16) & ((((kv >>> 16) ^ code) - 1) >> 31))) | 0;
     i = (i + 2) | 0;
   }
-  addState(M_EUCKR, nat, chars, d0, 0, 0, 0);
+  addState(M_EUCKR, nat, chars, d0, 0, 0, extra);
   return i;
 };
 
-const scanCp949 = (data: Uint8Array, i: number, stop: number, n: number): number => {
+const scanCp949 = (
+  data: Uint8Array,
+  i: number,
+  stop: number,
+  n: number,
+  truncated: boolean,
+): number => {
   i = i | 0;
   stop = stop | 0;
   n = n | 0;
@@ -153,14 +206,21 @@ const scanCp949 = (data: Uint8Array, i: number, stop: number, n: number): number
   let nat = 0,
     chars = 0,
     d0 = 0,
-    trail = 0;
+    trail = 0,
+    extra = 0;
   while (i < stop) {
     const b0 = data[i];
     if (b0 < 0x80) {
       i = (i + 1) | 0;
       continue;
     }
-    if (b0 < 0x81 || b0 === 0xc9 || b0 >= 0xfe || ((i + 1) | 0) >= n) return -1;
+    if (b0 < 0x81 || b0 === 0xc9 || b0 >= 0xfe) return -1;
+    if (((i + 1) | 0) >= n) {
+      if (!truncated) return -1;
+      extra = (extra + 1) | 0;
+      i = n;
+      break;
+    }
     const b1 = data[(i + 1) | 0];
     const tc = b0 <= 0xc6 ? TRAIL_CLASS[M_CP949 * 256 + b1] : CP949_HITRAIL[b1];
     if ((tc & 1) === 0) return -1;
@@ -173,11 +233,17 @@ const scanCp949 = (data: Uint8Array, i: number, stop: number, n: number): number
     d0 = (d0 + (((kv << 16) >> 16) & ((((kv >>> 16) ^ code) - 1) >> 31))) | 0;
     i = (i + 2) | 0;
   }
-  addState(M_CP949, nat, chars, d0, 0, trail, 0);
+  addState(M_CP949, nat, chars, d0, 0, trail, extra);
   return i;
 };
 
-const scanGb18030 = (data: Uint8Array, i: number, stop: number, n: number): number => {
+const scanGb18030 = (
+  data: Uint8Array,
+  i: number,
+  stop: number,
+  n: number,
+  truncated: boolean,
+): number => {
   i = i | 0;
   stop = stop | 0;
   n = n | 0;
@@ -195,10 +261,23 @@ const scanGb18030 = (data: Uint8Array, i: number, stop: number, n: number): numb
       i = (i + 1) | 0;
       continue;
     }
-    if (b0 < 0x81 || b0 > 0xfe || ((i + 1) | 0) >= n) return -1;
+    if (b0 < 0x81 || b0 > 0xfe) return -1;
+    if (((i + 1) | 0) >= n) {
+      if (!truncated) return -1;
+      extra = (extra + 1) | 0;
+      i = n;
+      break;
+    }
     const b1 = data[(i + 1) | 0];
     if (b1 < 0x40) {
-      if (b1 < 0x30 || b1 > 0x39 || ((i + 3) | 0) >= n) return -1;
+      if (b1 < 0x30 || b1 > 0x39) return -1;
+      if (((i + 3) | 0) >= n) {
+        if (!truncated) return -1;
+        if (((i + 2) | 0) < n && (data[(i + 2) | 0] < 0x81 || data[(i + 2) | 0] > 0xfe)) return -1;
+        extra = (extra + (((i + 2) | 0) < n ? 2 : 1)) | 0;
+        i = n;
+        break;
+      }
       const b2 = data[(i + 2) | 0];
       const b3 = data[(i + 3) | 0];
       if (b2 < 0x81 || b2 > 0xfe || b3 < 0x30 || b3 > 0x39) return -1;
@@ -226,7 +305,13 @@ const scanGb18030 = (data: Uint8Array, i: number, stop: number, n: number): numb
   return i;
 };
 
-const scanBig5 = (data: Uint8Array, i: number, stop: number, n: number): number => {
+const scanBig5 = (
+  data: Uint8Array,
+  i: number,
+  stop: number,
+  n: number,
+  truncated: boolean,
+): number => {
   i = i | 0;
   stop = stop | 0;
   n = n | 0;
@@ -236,14 +321,21 @@ const scanBig5 = (data: Uint8Array, i: number, stop: number, n: number): number 
     chars = 0,
     d0 = 0,
     d1 = 0,
-    trail = 0;
+    trail = 0,
+    extra = 0;
   while (i < stop) {
     const b0 = data[i];
     if (b0 < 0x80) {
       i = (i + 1) | 0;
       continue;
     }
-    if (b0 < 0xa1 || b0 > 0xf9 || ((i + 1) | 0) >= n) return -1;
+    if (b0 < 0xa1 || b0 > 0xf9) return -1;
+    if (((i + 1) | 0) >= n) {
+      if (!truncated) return -1;
+      extra = (extra + 1) | 0;
+      i = n;
+      break;
+    }
     const b1 = data[(i + 1) | 0];
     const tc = TRAIL_CLASS[M_BIG5 * 256 + b1];
     if ((tc & 1) === 0) return -1;
@@ -260,7 +352,7 @@ const scanBig5 = (data: Uint8Array, i: number, stop: number, n: number): number 
     d1 = (d1 + (HD1[h] & hit)) | 0;
     i = (i + 2) | 0;
   }
-  addState(M_BIG5, nat, chars, d0, d1, trail, 0);
+  addState(M_BIG5, nat, chars, d0, d1, trail, extra);
   return i;
 };
 

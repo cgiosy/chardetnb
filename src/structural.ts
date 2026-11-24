@@ -13,14 +13,19 @@ export const buildUtf8Dfa = (): void => {
       UTF8_DFA[s * 256 + b] = ((b & 0x0f) === 0x0f ? U_FNC3 : U_C2) * 256;
 };
 
-export const utf8Valid = (data: Uint8Array, start: number, n: number): boolean => {
+export const utf8Valid = (
+  data: Uint8Array,
+  start: number,
+  n: number,
+  truncated: boolean,
+): boolean => {
   let s = 0;
   if (n < UTF8_SWAR_MIN) {
     for (let i = start | 0; i < n; i = (i + 1) | 0) {
       s = UTF8_DFA[(s + data[i]) | 0];
       if (s === UTF8_REJ) return false;
     }
-    return s === 0;
+    return truncated || s === 0;
   }
   let i = start | 0;
   const head = (4 - (data.byteOffset & 3)) & 3;
@@ -41,7 +46,7 @@ export const utf8Valid = (data: Uint8Array, start: number, n: number): boolean =
     if (s === UTF8_REJ) return false;
     i = (i + 1) | 0;
   }
-  return s === 0;
+  return truncated || s === 0;
 };
 
 export const validateUtf32 = (data: Uint8Array, len: number, be: boolean): boolean => {
@@ -58,7 +63,12 @@ export const validateUtf32 = (data: Uint8Array, len: number, be: boolean): boole
   return true;
 };
 
-export const validateUtf16 = (data: Uint8Array, len: number, be: boolean): boolean => {
+export const validateUtf16 = (
+  data: Uint8Array,
+  len: number,
+  be: boolean,
+  truncated: boolean,
+): boolean => {
   if (len < 2 || (len & 1) !== 0) return false;
   const hiOff = be ? 0 : 1;
   const loOff = be ? 1 : 0;
@@ -66,7 +76,7 @@ export const validateUtf16 = (data: Uint8Array, len: number, be: boolean): boole
     const u = (data[i + hiOff] << 8) | data[i + loOff];
     if (u >= 0x20 && u < 0x7f) continue;
     if (u >= 0xd800 && u <= 0xdbff) {
-      if (i + 2 >= len) return false;
+      if (i + 2 >= len) return truncated;
       const u2 = (data[i + 2 + hiOff] << 8) | data[i + 2 + loOff];
       if (u2 < 0xdc00 || u2 > 0xdfff) return false;
       i = (i + 2) | 0;
@@ -129,20 +139,18 @@ const U_E0 = 4;
 const U_ED = 5;
 const U_EF = 6;
 const U_EFBF = 7;
-const U_C2A = 8;
-const U_F0 = 9;
-const U_F1 = 10;
-const U_F4 = 11;
-const U_FNC3 = 12;
-const U_FNC4 = 13;
-const U_NUM = 14;
+const U_F0 = 8;
+const U_F1 = 9;
+const U_F4 = 10;
+const U_FNC3 = 11;
+const U_FNC4 = 12;
+const U_NUM = 13;
 const UTF8_REJ = U_REJ * 256;
 const UTF8_DFA = new Uint16Array(U_NUM * 256).fill(UTF8_REJ);
 
 const UTF8_RULES: readonly (readonly [number, number, number, number])[] = [
   [U_ACC, 0x00, 0x7f, U_ACC],
-  [U_ACC, 0xc2, 0xc2, U_C2A],
-  [U_ACC, 0xc3, 0xdf, U_C1],
+  [U_ACC, 0xc2, 0xdf, U_C1],
   [U_ACC, 0xe0, 0xe0, U_E0],
   [U_ACC, 0xe1, 0xec, U_C2],
   [U_ACC, 0xed, 0xed, U_ED],
@@ -152,7 +160,6 @@ const UTF8_RULES: readonly (readonly [number, number, number, number])[] = [
   [U_ACC, 0xf4, 0xf4, U_F4],
   [U_C1, 0x80, 0xbf, U_ACC],
   [U_C2, 0x80, 0xbf, U_C1],
-  [U_C2A, 0xa0, 0xbf, U_ACC],
   [U_E0, 0xa0, 0xbf, U_C1],
   [U_ED, 0x80, 0x9f, U_C1],
   [U_EF, 0xa4, 0xbf, U_C1],

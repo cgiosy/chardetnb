@@ -46,10 +46,7 @@ export const buildMbcs = (): void => {
     masked(big5Codes, big5Logp, big5Mask, 1),
   ];
 
-  for (const [k, l] of MODEL_LANG.entries()) {
-    MODEL_ASCII_W[k] = ASCII_REST[l];
-    MODEL_NATIVE_W[k] = NONASCII_REST[l];
-  }
+  for (const [k, l] of MODEL_LANG.entries()) MODEL_NATIVE_W[k] = NONASCII_REST[l] + MBCS_ZSHIFT[k];
 
   HMUL.set(decodeInts(HMUL_CODES, NUM_MBCS, true));
   for (let m = 0; m <= NUM_MBCS; m++) HOFF[m] = m * (1 << (32 - HSHIFT));
@@ -85,10 +82,11 @@ export const buildMbcs = (): void => {
     const first = MODEL_FIRST[m];
     const deltas = new Map<number, [number, number]>();
     for (const [k, [codes, logps]] of models.slice(first, MODEL_FIRST[m + 1]).entries()) {
+      const shift = MBCS_ZSHIFT[first + k];
       const rest = MODEL_NATIVE_W[first + k];
       let mx = Math.max(rest, OOS);
       for (const [j, code] of codes.entries()) {
-        const logp = logps[j];
+        const logp = logps[j] + shift;
         if (j > 0 && code <= codes[j - 1]) throw new Error("MBCS entries must be strictly sorted");
         let d = deltas.get(code);
         if (d === undefined) deltas.set(code, (d = [0, 0]));
@@ -105,7 +103,105 @@ export const buildMbcs = (): void => {
   }
 };
 
-const HCAP = 8192;
+export const mbcsPrefix = (
+  mv: number,
+  data: Uint8Array,
+  n: number,
+  highTotal: number,
+  firstHigh: number,
+  truncated: boolean,
+): number => {
+  let alive = 0;
+  for (let a = 0; a < mv; a++) {
+    const m = mbcsOrder[a];
+    mbcsNat[m] = 0;
+    mbcsChars[m] = 0;
+    mbcsDelta[2 * m] = 0;
+    mbcsDelta[2 * m + 1] = 0;
+    mbcsTrail[m] = 0;
+    mbcsExtra[m] = 0;
+    if (mbcsBound(m, highTotal) < pruneThreshold()) continue;
+    const i = scanMbcs(
+      m,
+      data,
+      firstHigh,
+      n - firstHigh > MBCS_PREFIX ? firstHigh + MBCS_PREFIX : n,
+      n,
+      truncated,
+    );
+    if (i < 0) continue;
+    const ub = mbcsBound(m, highTotal);
+    if (i >= n) {
+      addCandidate(MBCS_OFFSET + m, ub, mbcsLang);
+      continue;
+    }
+    mbcsPos[m] = i;
+    const rate = mbcsRate[m];
+    let k = alive++;
+    while (k > 0 && mbcsRate[mbcsAlive[k - 1]] < rate) {
+      mbcsAlive[k] = mbcsAlive[k - 1];
+      k--;
+    }
+    mbcsAlive[k] = m;
+  }
+  return alive;
+};
+
+export const mbcsComplete = (
+  alive: number,
+  count: number,
+  data: Uint8Array,
+  n: number,
+  highTotal: number,
+  truncated: boolean,
+): number => {
+  let done = 0;
+  while (done < count && done < alive) {
+    const m = mbcsAlive[done++];
+    const t = pruneThreshold();
+    if (mbcsBound(m, highTotal) < t) continue;
+    let i = mbcsPos[m];
+    for (;;) {
+      i = scanMbcs(m, data, i, n - i > MBCS_CHUNK ? i + MBCS_CHUNK : n, n, truncated);
+      if (i < 0) break;
+      const ub = mbcsBound(m, highTotal);
+      if (i >= n) {
+        addCandidate(MBCS_OFFSET + m, ub, mbcsLang);
+        break;
+      }
+      if (ub < t) break;
+    }
+  }
+  for (let a = done; a < alive; a++) mbcsAlive[a - done] = mbcsAlive[a];
+  return alive - done;
+};
+
+const mbcsBound = (m: number, highTotal: number): number => {
+  const nat = mbcsNat[m];
+  const chars = mbcsChars[m];
+  const trail = mbcsTrail[m];
+  const highDone = 2 * chars + mbcsExtra[m] - trail;
+  const remHigh = highTotal - highDone;
+  const maxRemTrail = HAS_ASCII_TRAIL[m] !== 0 ? Math.min(remHigh, asciiTotal - trail) : 0;
+  const trailBonus = (trail + maxRemTrail) * H_ASCII;
+  const charsMin = Math.ceil(remHigh / MBCS_MAX_HIGH_PER_CHAR[m]);
+  const first = MODEL_FIRST[m];
+  const end = MODEL_FIRST[m + 1];
+  let best = -Infinity;
+  let bestScanned = -Infinity;
+  for (let k = first; k < end; k++) {
+    const scanned = mbcsDelta[2 * m + k - first] + nat * MODEL_NATIVE_W[k] + (chars - nat) * OOS;
+    const v = scanned + trailBonus + charsMin * MBCS_MAX_CHAR_W[k];
+    if (v > best) {
+      best = v;
+      mbcsLang = MODEL_LANG[k];
+    }
+    const sc = scanned + trail * H_ASCII;
+    if (sc > bestScanned) bestScanned = sc;
+  }
+  mbcsRate[m] = highDone > 0 ? bestScanned / highDone : 0;
+  return best;
+};
 
 const decodeDeltas = (src: string, n: number, signed: boolean): Int32Array => {
   const vals = decodeInts(src, n, signed);
@@ -141,12 +237,43 @@ const inRanges = (ranges: readonly number[], b: number): boolean => {
   return false;
 };
 
+const HCAP = 8192;
+const H_ASCII = 1280;
+const MBCS_PREFIX = 256;
+const MBCS_CHUNK = 1024;
+const MBCS_MAX_HIGH_PER_CHAR = Int32Array.of(2, 3, 2, 2, 2, 2);
+const HAS_ASCII_TRAIL = Uint8Array.of(1, 0, 0, 1, 1, 1);
+const MBCS_ZSHIFT = Int32Array.of(46, 46, 105, 105, 46, 46, 46, 46);
+const mbcsAlive = new Int32Array(NUM_MBCS);
+let mbcsLang = -1;
+const { NONASCII_REST } = model;
+const {
+  HSHIFT,
+  HOFF,
+  HMUL,
+  HKD0,
+  HD1,
+  NATW,
+  TRAIL_CLASS,
+  CP949_HITRAIL,
+  MODEL_FIRST,
+  MODEL_LANG,
+  MODEL_NATIVE_W,
+  MBCS_MAX_CHAR_W,
+  MBCS_INVALID,
+} = mbcsModel;
+const { mbcsNat, mbcsChars, mbcsDelta, mbcsTrail, mbcsExtra, mbcsPos, mbcsRate, mbcsOrder } =
+  scratch;
+
 const MBCS_GRAMMAR: readonly Grammar[] = [
   {
     bad: [0xfd, 0xff],
-    lead: [0x81, 0x9f, 0xe0, 0xef],
+    lead: [0x81, 0x9f, 0xe0, 0xfc],
     trail: [0x40, 0x7e, 0x80, 0xfc],
-    native: [0x8140, 0x81ac, 0x829f, 0x82f1, 0x8340, 0x8396, 0x889f, 0x9ffc, 0xe040, 0xeaa4],
+    native: [
+      0x8140, 0x81ac, 0x829f, 0x82f1, 0x8340, 0x8396, 0x8740, 0x879c, 0x889f, 0x9ffc, 0xe040,
+      0xeaa4, 0xed40, 0xeefc, 0xfa40, 0xfc4b,
+    ],
   },
   {
     bad: [0x80, 0x8d, 0x90, 0xa0, 0xff, 0xff],
@@ -191,123 +318,3 @@ type Grammar = {
   nativeLow?: readonly number[];
   hiTrail?: readonly number[];
 };
-
-export const mbcsPrefix = (
-  mv: number,
-  data: Uint8Array,
-  n: number,
-  highTotal: number,
-  firstHigh: number,
-): number => {
-  let alive = 0;
-  for (let a = 0; a < mv; a++) {
-    const m = mbcsOrder[a];
-    mbcsNat[m] = 0;
-    mbcsChars[m] = 0;
-    mbcsDelta[2 * m] = 0;
-    mbcsDelta[2 * m + 1] = 0;
-    mbcsTrail[m] = 0;
-    mbcsExtra[m] = 0;
-    if (mbcsBound(m, highTotal) < pruneThreshold()) continue;
-    const i = scanMbcs(
-      m,
-      data,
-      firstHigh,
-      n - firstHigh > MBCS_PREFIX ? firstHigh + MBCS_PREFIX : n,
-      n,
-    );
-    if (i < 0) continue;
-    const ub = mbcsBound(m, highTotal);
-    if (i >= n) {
-      addCandidate(MBCS_OFFSET + m, ub, mbcsLang);
-      continue;
-    }
-    mbcsPos[m] = i;
-    const rate = mbcsRate[m];
-    let k = alive++;
-    while (k > 0 && mbcsRate[mbcsAlive[k - 1]] < rate) {
-      mbcsAlive[k] = mbcsAlive[k - 1];
-      k--;
-    }
-    mbcsAlive[k] = m;
-  }
-  return alive;
-};
-
-export const mbcsComplete = (
-  alive: number,
-  count: number,
-  data: Uint8Array,
-  n: number,
-  highTotal: number,
-): number => {
-  let done = 0;
-  while (done < count && done < alive) {
-    const m = mbcsAlive[done++];
-    const t = pruneThreshold();
-    if (mbcsBound(m, highTotal) < t) continue;
-    let i = mbcsPos[m];
-    for (;;) {
-      i = scanMbcs(m, data, i, n - i > MBCS_CHUNK ? i + MBCS_CHUNK : n, n);
-      if (i < 0) break;
-      const ub = mbcsBound(m, highTotal);
-      if (i >= n) {
-        addCandidate(MBCS_OFFSET + m, ub, mbcsLang);
-        break;
-      }
-      if (ub < t) break;
-    }
-  }
-  for (let a = done; a < alive; a++) mbcsAlive[a - done] = mbcsAlive[a];
-  return alive - done;
-};
-
-const mbcsBound = (m: number, highTotal: number): number => {
-  const nat = mbcsNat[m];
-  const chars = mbcsChars[m];
-  const trail = mbcsTrail[m];
-  const highDone = 2 * chars + mbcsExtra[m] - trail;
-  const remHigh = highTotal - highDone;
-  const asciiMin = Math.max(0, asciiTotal - trail - remHigh);
-  const charsMin = Math.ceil(remHigh / MBCS_MAX_HIGH_PER_CHAR[m]);
-  const first = MODEL_FIRST[m];
-  const end = MODEL_FIRST[m + 1];
-  let best = -Infinity;
-  let bestScanned = -Infinity;
-  for (let k = first; k < end; k++) {
-    const scanned = mbcsDelta[2 * m + k - first] + nat * MODEL_NATIVE_W[k] + (chars - nat) * OOS;
-    const v = scanned + asciiMin * MODEL_ASCII_W[k] + charsMin * MBCS_MAX_CHAR_W[k];
-    if (v > best) {
-      best = v;
-      mbcsLang = MODEL_LANG[k];
-    }
-    if (scanned > bestScanned) bestScanned = scanned;
-  }
-  mbcsRate[m] = highDone > 0 ? bestScanned / highDone : 0;
-  return best;
-};
-
-const MBCS_PREFIX = 256;
-const MBCS_CHUNK = 1024;
-const MBCS_MAX_HIGH_PER_CHAR = Int32Array.of(2, 3, 2, 2, 2, 2);
-const mbcsAlive = new Int32Array(NUM_MBCS);
-let mbcsLang = -1;
-const { ASCII_REST, NONASCII_REST } = model;
-const {
-  HSHIFT,
-  HOFF,
-  HMUL,
-  HKD0,
-  HD1,
-  NATW,
-  TRAIL_CLASS,
-  CP949_HITRAIL,
-  MODEL_FIRST,
-  MODEL_LANG,
-  MODEL_ASCII_W,
-  MODEL_NATIVE_W,
-  MBCS_MAX_CHAR_W,
-  MBCS_INVALID,
-} = mbcsModel;
-const { mbcsNat, mbcsChars, mbcsDelta, mbcsTrail, mbcsExtra, mbcsPos, mbcsRate, mbcsOrder } =
-  scratch;
