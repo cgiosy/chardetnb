@@ -10,8 +10,38 @@ import {
 } from "./model.js";
 
 export const scoreSbcs = (nv: number, n: number): void => {
+  byCount(n > SBCS_INT_MAX);
   if (n <= SBCS_INT_MAX) scoreSbcsI32(nv);
   else scoreSbcsF64(nv);
+};
+
+// Reorders the high-byte histogram by count bit length, largest first. Every weight is <= 0 and
+// sums cannot overflow, so partial sums only fall: the result does not depend on term order, but
+// losing languages cross the pruning threshold after fewer terms.
+const byCount = (f64: boolean): void => {
+  bucket.fill(0);
+  for (let j = 0; j < nH; j = (j + 1) | 0) {
+    const k = Math.clz32(cntH32[j]);
+    bucket[k] = bucket[k] + 1;
+  }
+  for (let k = 0, at = 0; k < 33; k = (k + 1) | 0) {
+    const c = bucket[k];
+    bucket[k] = at;
+    at = (at + c) | 0;
+  }
+  for (let j = 0; j < nH; j = (j + 1) | 0) {
+    const c = cntH32[j];
+    const k = Math.clz32(c);
+    const at = bucket[k];
+    bucket[k] = (at + 1) | 0;
+    tmpB[at] = actH[j];
+    tmpC[at] = c;
+  }
+  for (let j = 0; j < nH; j = (j + 1) | 0) {
+    actH[j] = tmpB[j];
+    cntH32[j] = tmpC[j];
+    if (f64) cntH[j] = tmpC[j];
+  }
 };
 
 const scoreSbcsI32 = (nv: number): void => {
@@ -64,6 +94,7 @@ const scoreSbcsI32 = (nv: number): void => {
   let prevE = -1;
   let prevBest = -Infinity;
   let prevLang = -1;
+  langHint.fill(-1);
   for (let a = 0; a < nv; a++) {
     const e = sbcsOrder[a];
     const t = pruneThreshold();
@@ -77,23 +108,34 @@ const scoreSbcsI32 = (nv: number): void => {
     } else {
       const s = SBCS_SCRIPT[e];
       const first = SCRIPT_FIRST[s];
-      const last = first + SCRIPT_COUNT[s];
+      const count = SCRIPT_COUNT[s];
+      const last = first + count;
       const poff = pairOff[e] - first;
-      for (let l = first; l < last; l++) {
+      // Start from the language that won the previous encoding of this script: a high eBest early
+      // prunes the others sooner, and ties still go to the lowest l.
+      let l = langHint[s] >= 0 ? langHint[s] : first;
+      for (let k = 0; k < count; k++, l = l + 1 === last ? first : l + 1) {
         const thr = eBest > t ? eBest : t;
         let v = 0;
         const pw = ((poff + l) * 128) | 0;
         let j = 0;
-        for (; j < nH; j = (j + 1) | 0) {
-          v = (v + cntH32[j] * pairW[(pw + actH[j]) | 0]) | 0;
+        for (; j + 1 < nH; j = (j + 2) | 0) {
+          v =
+            (v + cntH32[j] * pairW[(pw + actH[j]) | 0] + cntH32[j + 1] * pairW[(pw + actH[j + 1]) | 0]) |
+            0;
           if (v < thr) break;
         }
-        if (j < nH) continue;
+        if (j + 1 < nH) continue;
+        if (j < nH) {
+          v = (v + cntH32[j] * pairW[(pw + actH[j]) | 0]) | 0;
+          if (v < thr) continue;
+        }
         if (v > eBest || (v === eBest && l < eLang)) {
           eBest = v;
           eLang = l;
         }
       }
+      if (eLang >= 0) langHint[s] = eLang;
       prevE = e;
       prevBest = eBest;
       prevLang = eLang;
@@ -121,6 +163,7 @@ const scoreSbcsF64 = (nv: number): void => {
   let prevE = -1;
   let prevBest = -Infinity;
   let prevLang = -1;
+  langHint.fill(-1);
   for (let a = 0; a < nv; a++) {
     const e = sbcsOrder[a];
     const t = pruneThreshold();
@@ -134,9 +177,13 @@ const scoreSbcsF64 = (nv: number): void => {
     } else {
       const s = SBCS_SCRIPT[e];
       const first = SCRIPT_FIRST[s];
-      const last = first + SCRIPT_COUNT[s];
+      const count = SCRIPT_COUNT[s];
+      const last = first + count;
       const poff = pairOff[e] - first;
-      for (let l = first; l < last; l++) {
+      // Start from the language that won the previous encoding of this script: a high eBest early
+      // prunes the others sooner, and ties still go to the lowest l.
+      let l = langHint[s] >= 0 ? langHint[s] : first;
+      for (let k = 0; k < count; k++, l = l + 1 === last ? first : l + 1) {
         const thr = eBest > t ? eBest : t;
         let v = 0;
         const pw = ((poff + l) * 128) | 0;
@@ -151,6 +198,7 @@ const scoreSbcsF64 = (nv: number): void => {
           eLang = l;
         }
       }
+      if (eLang >= 0) langHint[s] = eLang;
       prevE = e;
       prevBest = eBest;
       prevLang = eLang;
@@ -181,6 +229,10 @@ const sameOnPresent = (e: number, prevE: number): boolean => {
   return true;
 };
 
+const langHint = new Int32Array(16);
+const bucket = new Int32Array(33);
+const tmpB = new Uint8Array(128);
+const tmpC = new Int32Array(128);
 const ubound = new Float64Array(NUM_SBCS);
 const ubound32 = new Int32Array(NUM_SBCS);
 const { SBCS_SCRIPT, SCRIPT_FIRST, SCRIPT_COUNT, pairOff, pairW, WMAXT, GMAX, SBCS_KEY } = model;

@@ -7,20 +7,22 @@ export const scanMbcs = (
   stop: number,
   n: number,
   truncated: boolean,
+  words: Int32Array,
+  head: number,
 ): number => {
   switch (m) {
     case M_SJIS:
-      return scanSjis(data, i, stop, n, truncated);
+      return scanSjis(data, i, stop, n, truncated, words, head);
     case M_EUCJP:
-      return scanEucJp(data, i, stop, n, truncated);
+      return scanEucJp(data, i, stop, n, truncated, words, head);
     case M_EUCKR:
-      return scanEucKr(data, i, stop, n, truncated);
+      return scanEucKr(data, i, stop, n, truncated, words, head);
     case M_CP949:
-      return scanCp949(data, i, stop, n, truncated);
+      return scanCp949(data, i, stop, n, truncated, words, head);
     case M_GB18030:
-      return scanGb18030(data, i, stop, n, truncated);
+      return scanGb18030(data, i, stop, n, truncated, words, head);
     default:
-      return scanBig5(data, i, stop, n, truncated);
+      return scanBig5(data, i, stop, n, truncated, words, head);
   }
 };
 
@@ -30,10 +32,13 @@ const scanSjis = (
   stop: number,
   n: number,
   truncated: boolean,
+  words: Int32Array,
+  head: number,
 ): number => {
   i = i | 0;
   stop = stop | 0;
   n = n | 0;
+  const wend = words.length !== 0 ? (stop - head) >> 2 : 0;
   const hoff = HOFF[M_SJIS];
   const mul = HMUL[M_SJIS];
   let nat = 0,
@@ -45,6 +50,10 @@ const scanSjis = (
     const b0 = data[i];
     if (b0 < 0x80) {
       i = (i + 1) | 0;
+      if (((i - head) & 3) === 0) {
+        const j = (i - head) >> 2;
+        if (j < wend && (words[j] & 0x80808080) === 0) i = skipAsciiWords(words, j + 1, wend, head);
+      }
       continue;
     }
     if (b0 >= 0xa1 && b0 <= 0xdf) {
@@ -83,10 +92,13 @@ const scanEucJp = (
   stop: number,
   n: number,
   truncated: boolean,
+  words: Int32Array,
+  head: number,
 ): number => {
   i = i | 0;
   stop = stop | 0;
   n = n | 0;
+  const wend = words.length !== 0 ? (stop - head) >> 2 : 0;
   const hoff = HOFF[M_EUCJP];
   const mul = HMUL[M_EUCJP];
   let nat = 0,
@@ -97,6 +109,10 @@ const scanEucJp = (
     const b0 = data[i];
     if (b0 < 0x80) {
       i = (i + 1) | 0;
+      if (((i - head) & 3) === 0) {
+        const j = (i - head) >> 2;
+        if (j < wend && (words[j] & 0x80808080) === 0) i = skipAsciiWords(words, j + 1, wend, head);
+      }
       continue;
     }
     if (b0 >= 0xa1 && b0 <= 0xfe) {
@@ -154,10 +170,13 @@ const scanEucKr = (
   stop: number,
   n: number,
   truncated: boolean,
+  words: Int32Array,
+  head: number,
 ): number => {
   i = i | 0;
   stop = stop | 0;
   n = n | 0;
+  const wend = words.length !== 0 ? (stop - head) >> 2 : 0;
   const hoff = HOFF[M_EUCKR];
   const mul = HMUL[M_EUCKR];
   let nat = 0,
@@ -168,6 +187,10 @@ const scanEucKr = (
     const b0 = data[i];
     if (b0 < 0x80) {
       i = (i + 1) | 0;
+      if (((i - head) & 3) === 0) {
+        const j = (i - head) >> 2;
+        if (j < wend && (words[j] & 0x80808080) === 0) i = skipAsciiWords(words, j + 1, wend, head);
+      }
       continue;
     }
     if (b0 < 0xa1 || b0 === 0xc9 || b0 >= 0xfe) return -1;
@@ -197,10 +220,13 @@ const scanCp949 = (
   stop: number,
   n: number,
   truncated: boolean,
+  words: Int32Array,
+  head: number,
 ): number => {
   i = i | 0;
   stop = stop | 0;
   n = n | 0;
+  const wend = words.length !== 0 ? (stop - head) >> 2 : 0;
   const hoff = HOFF[M_CP949];
   const mul = HMUL[M_CP949];
   let nat = 0,
@@ -212,6 +238,10 @@ const scanCp949 = (
     const b0 = data[i];
     if (b0 < 0x80) {
       i = (i + 1) | 0;
+      if (((i - head) & 3) === 0) {
+        const j = (i - head) >> 2;
+        if (j < wend && (words[j] & 0x80808080) === 0) i = skipAsciiWords(words, j + 1, wend, head);
+      }
       continue;
     }
     if (b0 < 0x81 || b0 === 0xc9 || b0 >= 0xfe) return -1;
@@ -243,10 +273,13 @@ const scanGb18030 = (
   stop: number,
   n: number,
   truncated: boolean,
+  words: Int32Array,
+  head: number,
 ): number => {
   i = i | 0;
   stop = stop | 0;
   n = n | 0;
+  const wend = words.length !== 0 ? (stop - head) >> 2 : 0;
   const hoff = HOFF[M_GB18030];
   const mul = HMUL[M_GB18030];
   let nat = 0,
@@ -259,6 +292,10 @@ const scanGb18030 = (
     const b0 = data[i];
     if (b0 < 0x80) {
       i = (i + 1) | 0;
+      if (((i - head) & 3) === 0) {
+        const j = (i - head) >> 2;
+        if (j < wend && (words[j] & 0x80808080) === 0) i = skipAsciiWords(words, j + 1, wend, head);
+      }
       continue;
     }
     if (b0 < 0x81 || b0 > 0xfe) return -1;
@@ -311,10 +348,13 @@ const scanBig5 = (
   stop: number,
   n: number,
   truncated: boolean,
+  words: Int32Array,
+  head: number,
 ): number => {
   i = i | 0;
   stop = stop | 0;
   n = n | 0;
+  const wend = words.length !== 0 ? (stop - head) >> 2 : 0;
   const hoff = HOFF[M_BIG5];
   const mul = HMUL[M_BIG5];
   let nat = 0,
@@ -327,6 +367,10 @@ const scanBig5 = (
     const b0 = data[i];
     if (b0 < 0x80) {
       i = (i + 1) | 0;
+      if (((i - head) & 3) === 0) {
+        const j = (i - head) >> 2;
+        if (j < wend && (words[j] & 0x80808080) === 0) i = skipAsciiWords(words, j + 1, wend, head);
+      }
       continue;
     }
     if (b0 < 0xa1 || b0 > 0xf9) return -1;
@@ -354,6 +398,13 @@ const scanBig5 = (
   }
   addState(M_BIG5, nat, chars, d0, d1, trail, extra);
   return i;
+};
+
+// Returns the byte position of the first word in [j, end) holding a byte >= 0x80 (or of end).
+const skipAsciiWords = (words: Int32Array, j: number, end: number, head: number): number => {
+  while (j + 1 < end && ((words[j] | words[j + 1]) & 0x80808080) === 0) j = (j + 2) | 0;
+  if (j < end && (words[j] & 0x80808080) === 0) j = (j + 1) | 0;
+  return (head + (j << 2)) | 0;
 };
 
 const addState = (

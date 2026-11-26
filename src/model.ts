@@ -127,34 +127,105 @@ export const decodeMask = (src: string, n: number): Uint8Array => {
   return out;
 };
 export const OOS = -6615;
-export const countBytes = (data: Uint8Array, n: number): void => {
-  n = n | 0;
-  let i = 0;
-  if (n >= 32) {
-    const head = (4 - (data.byteOffset & 3)) & 3;
-    for (; i < head; i = (i + 1) | 0) {
+// Counts data[i..n) into hist. Word counting may add printable ASCII too (compactHistogram drops it);
+// what matters is that every high byte and every control byte is counted. Long inputs go by chunks
+// whose first 16 words pick the loop: mostly printable ASCII skips such words, a lead byte repeating
+// two lanes apart (CJK) splits lanes 2-3 into a second bank so one counter does not serialize the
+// stores, anything else counts every word into hist.
+export const countHigh = (
+  data: Uint8Array,
+  i: number,
+  n: number,
+  words: Int32Array,
+  head: number,
+): void => {
+  if (words.length !== 0) {
+    for (; ((i - head) & 3) !== 0 && i < n; i = (i + 1) | 0) {
       const b = data[i];
       hist[b] = hist[b] + 1;
     }
-    const words = ((n - head) >>> 2) | 0;
-    const u = new Uint32Array(data.buffer, data.byteOffset + head, words);
-    for (let j = 0; j < words; j = (j + 1) | 0) {
-      const w = u[j];
-      const b0 = w & 255;
-      const b1 = (w >>> 8) & 255;
-      const b2 = (w >>> 16) & 255;
-      const b3 = w >>> 24;
-      hist[b0] = hist[b0] + 1;
-      hist[b1] = hist[b1] + 1;
-      hist[b2] = hist[b2] + 1;
-      hist[b3] = hist[b3] + 1;
+    const wn = words.length;
+    let j = (i - head) >> 2;
+    if (j < wn) {
+      if (wn - j < 64) countSparse(words, j, wn);
+      else {
+        let banked = false;
+        while (j < wn) {
+          const end = j + CHUNK_WORDS < wn ? j + CHUNK_WORDS : wn;
+          const pe = j + 16 < end ? j + 16 : end;
+          let clean = 0;
+          let rep = 0;
+          for (let k = j; k < pe; k = (k + 1) | 0) {
+            const w = words[k];
+            if (((w | (w - 0x20202020) | (w + 0x01010101)) & 0x80808080) === 0) clean++;
+            const x = w ^ (w >>> 16);
+            if (((x & 0xff) === 0 && (w & 0x80) !== 0) || ((x & 0xff00) === 0 && (w & 0x8000) !== 0))
+              rep++;
+          }
+          if (clean >= 8) countSparse(words, j, end);
+          else if (rep >= 4) {
+            countBanked(words, j, end);
+            banked = true;
+          } else countDense(words, j, end);
+          j = end;
+        }
+        if (banked)
+          for (let b = 0; b < 256; b = (b + 1) | 0) {
+            hist[b] = hist[b] + bank2[b];
+            bank2[b] = 0;
+          }
+      }
+      i = (head + (wn << 2)) | 0;
     }
-    i = (head + words * 4) | 0;
   }
   for (; i < n; i = (i + 1) | 0) {
     const b = data[i];
     hist[b] = hist[b] + 1;
   }
+};
+const countSparse = (words: Int32Array, j: number, end: number): void => {
+  for (; j < end; j = (j + 1) | 0) {
+    const w = words[j];
+    if (((w | (w - 0x20202020) | (w + 0x01010101)) & 0x80808080) === 0) continue;
+    const b0 = w & 255;
+    const b1 = (w >>> 8) & 255;
+    const b2 = (w >>> 16) & 255;
+    const b3 = w >>> 24;
+    hist[b0] = hist[b0] + 1;
+    hist[b1] = hist[b1] + 1;
+    hist[b2] = hist[b2] + 1;
+    hist[b3] = hist[b3] + 1;
+  }
+};
+const countDense = (words: Int32Array, j: number, end: number): void => {
+  for (; j < end; j = (j + 1) | 0) {
+    const w = words[j];
+    const b0 = w & 255;
+    const b1 = (w >>> 8) & 255;
+    const b2 = (w >>> 16) & 255;
+    const b3 = w >>> 24;
+    hist[b0] = hist[b0] + 1;
+    hist[b1] = hist[b1] + 1;
+    hist[b2] = hist[b2] + 1;
+    hist[b3] = hist[b3] + 1;
+  }
+};
+const countBanked = (words: Int32Array, j: number, end: number): void => {
+  for (; j < end; j = (j + 1) | 0) {
+    const w = words[j];
+    const b0 = w & 255;
+    const b1 = (w >>> 8) & 255;
+    const b2 = (w >>> 16) & 255;
+    const b3 = w >>> 24;
+    hist[b0] = hist[b0] + 1;
+    hist[b1] = hist[b1] + 1;
+    bank2[b2] = bank2[b2] + 1;
+    bank2[b3] = bank2[b3] + 1;
+  }
+};
+export const noHigh = (n: number): void => {
+  nH = 0;
+  asciiTotal = n;
 };
 export const compactHistogram = (n: number): number => {
   let controls = 0;
@@ -188,12 +259,12 @@ export const compactHistogram = (n: number): number => {
       actH[h] = b - 0x80;
       cntH32[h] = c | 0;
       h = (h + 1) | 0;
-      high += c;
+      high += c >>> 0;
     }
   }
   nH = h;
   asciiTotal = n - high;
-  if (n > SBCS_INT_MAX) cntH.set(cntH32.subarray(0, h));
+  if (n > SBCS_INT_MAX) for (let k = 0; k < h; k++) cntH[k] = cntH32[k];
   return controls;
 };
 export const resetCandidates = (): void => {
@@ -329,7 +400,9 @@ export const scratch = {
   mbcsOrder,
   sbcsOrder,
 };
-const hist = new Uint32Array(256);
+const hist = new Int32Array(256);
+const bank2 = new Int32Array(256);
+const CHUNK_WORDS = 4096;
 export let nH = 0;
 export let asciiTotal = 0;
 let bestLL = -Infinity;

@@ -110,6 +110,8 @@ export const mbcsPrefix = (
   highTotal: number,
   firstHigh: number,
   truncated: boolean,
+  words: Int32Array,
+  head: number,
 ): number => {
   let alive = 0;
   for (let a = 0; a < mv; a++) {
@@ -120,7 +122,8 @@ export const mbcsPrefix = (
     mbcsDelta[2 * m + 1] = 0;
     mbcsTrail[m] = 0;
     mbcsExtra[m] = 0;
-    if (mbcsBound(m, highTotal) < pruneThreshold()) continue;
+    const t = pruneThreshold();
+    if (t > -Infinity && mbcsBound(m, highTotal) < t) continue;
     const i = scanMbcs(
       m,
       data,
@@ -128,6 +131,8 @@ export const mbcsPrefix = (
       n - firstHigh > MBCS_PREFIX ? firstHigh + MBCS_PREFIX : n,
       n,
       truncated,
+      words,
+      head,
     );
     if (i < 0) continue;
     const ub = mbcsBound(m, highTotal);
@@ -154,6 +159,8 @@ export const mbcsComplete = (
   n: number,
   highTotal: number,
   truncated: boolean,
+  words: Int32Array,
+  head: number,
 ): number => {
   let done = 0;
   while (done < count && done < alive) {
@@ -162,7 +169,7 @@ export const mbcsComplete = (
     if (mbcsBound(m, highTotal) < t) continue;
     let i = mbcsPos[m];
     for (;;) {
-      i = scanMbcs(m, data, i, n - i > MBCS_CHUNK ? i + MBCS_CHUNK : n, n, truncated);
+      i = scanMbcs(m, data, i, n - i > MBCS_CHUNK ? i + MBCS_CHUNK : n, n, truncated, words, head);
       if (i < 0) break;
       const ub = mbcsBound(m, highTotal);
       if (i >= n) {

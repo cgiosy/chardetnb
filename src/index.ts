@@ -14,10 +14,11 @@ import {
   asciiTotal,
   buildModel,
   compactHistogram,
-  countBytes,
+  countHigh,
   mbcsModel,
   model,
   nH,
+  noHigh,
   resetCandidates,
   scratch,
 } from "./model.js";
@@ -29,11 +30,12 @@ import {
   ENC_UTF_32BE,
   ENC_UTF_32LE,
   ENC_UTF_8,
-  buildUtf8Dfa,
+  asciiPrefix,
   detectIso2022,
   inPool,
   nulParity,
-  utf8Valid,
+  scanCtl,
+  utf8Scan,
   validateUtf16,
   validateUtf32,
 } from "./structural.js";
@@ -87,8 +89,25 @@ export const detectInto = (
   )
     return setResult(out, ENC_UTF_16LE, -1, 1, 99);
 
-  countBytes(data, n);
-  const controls = compactHistogram(n);
+  const head = (4 - (data.byteOffset & 3)) & 3;
+  const words =
+    IS_LE && n >= WORDS_MIN
+      ? new Int32Array(data.buffer, data.byteOffset + head, (n - head) >>> 2)
+      : NO_WORDS;
+  const firstHigh = asciiPrefix(data, n, words, head);
+  let controls = scanCtl;
+  if (firstHigh < n) {
+    // With a high byte present only NUL decides between the UTF-16/32 checks and null, so valid
+    // UTF-8 never needs the histogram.
+    if (inPool(poolLo, poolHi, ENC_UTF_8) && utf8Scan(data, firstHigh, n, truncated, words, head)) {
+      controls |= scanCtl;
+      if ((controls & 1) !== 0) return detectNul(data, n, poolLo, poolHi, truncated, out);
+      if ((controls & (BAD_C0 | SO_SI | ESC)) !== 0) return setResult(out, -1, -1, 0, 0);
+      return setResult(out, ENC_UTF_8, -1, 1, 99);
+    }
+    countHigh(data, firstHigh, n, words, head);
+    controls |= compactHistogram(n);
+  } else noHigh(n);
   const hasNul = (controls & 1) !== 0;
   const hasEsc = (controls & ESC) !== 0;
   let badC0 = (controls & BAD_C0) !== 0;
@@ -101,44 +120,49 @@ export const detectInto = (
     if (inPool(poolLo, poolHi, ENC_ASCII)) return setResult(out, ENC_ASCII, -1, 1, 99);
     if (inPool(poolLo, poolHi, ENC_UTF_8)) return setResult(out, ENC_UTF_8, -1, 1, 99);
   }
-  if (hasNul) {
-    const n32 = truncated ? n & ~3 : n;
-    if ((n32 & 3) === 0 && n32 >= 4) {
-      if (inPool(poolLo, poolHi, ENC_UTF_32BE) && validateUtf32(data, n32, true))
-        return setResult(out, ENC_UTF_32BE, -1, 1, 99);
-      if (inPool(poolLo, poolHi, ENC_UTF_32LE) && validateUtf32(data, n32, false))
-        return setResult(out, ENC_UTF_32LE, -1, 1, 99);
-    }
-    const n16 = truncated ? n & ~1 : n;
-    if ((n16 & 1) === 0 && n16 >= 2) {
-      const [evenNul, oddNul] = nulParity(data, n16);
-      if (
-        evenNul > oddNul * 2 &&
-        inPool(poolLo, poolHi, ENC_UTF_16BE) &&
-        validateUtf16(data, n16, true, truncated)
-      )
-        return setResult(out, ENC_UTF_16BE, -1, 1, 99);
-      if (
-        oddNul > evenNul * 2 &&
-        inPool(poolLo, poolHi, ENC_UTF_16LE) &&
-        validateUtf16(data, n16, false, truncated)
-      )
-        return setResult(out, ENC_UTF_16LE, -1, 1, 99);
-    }
-    return setResult(out, -1, -1, 0, 0);
-  }
+  if (hasNul) return detectNul(data, n, poolLo, poolHi, truncated, out);
   if (badC0 || hasEsc) return setResult(out, -1, -1, 0, 0);
-  let firstHigh = 0;
-  while (firstHigh < n && data[firstHigh] < 0x80) firstHigh++;
-  if (inPool(poolLo, poolHi, ENC_UTF_8) && utf8Valid(data, firstHigh, n, truncated))
-    return setResult(out, ENC_UTF_8, -1, 1, 99);
-  return scoreStatistical(data, n, poolLo, poolHi, firstHigh, truncated, out);
+  // Here UTF-8 is out of the pool or already failed utf8Scan.
+  return scoreStatistical(data, n, poolLo, poolHi, firstHigh, truncated, words, head, out);
+};
+
+const detectNul = (
+  data: Uint8Array,
+  n: number,
+  poolLo: number,
+  poolHi: number,
+  truncated: boolean,
+  out: Result,
+): Result => {
+  const n32 = truncated ? n & ~3 : n;
+  if ((n32 & 3) === 0 && n32 >= 4) {
+    if (inPool(poolLo, poolHi, ENC_UTF_32BE) && validateUtf32(data, n32, true))
+      return setResult(out, ENC_UTF_32BE, -1, 1, 99);
+    if (inPool(poolLo, poolHi, ENC_UTF_32LE) && validateUtf32(data, n32, false))
+      return setResult(out, ENC_UTF_32LE, -1, 1, 99);
+  }
+  const n16 = truncated ? n & ~1 : n;
+  if ((n16 & 1) === 0 && n16 >= 2) {
+    const parity = nulParity(data, n16);
+    if (
+      parity > 0 &&
+      inPool(poolLo, poolHi, ENC_UTF_16BE) &&
+      validateUtf16(data, n16, true, truncated)
+    )
+      return setResult(out, ENC_UTF_16BE, -1, 1, 99);
+    if (
+      parity < 0 &&
+      inPool(poolLo, poolHi, ENC_UTF_16LE) &&
+      validateUtf16(data, n16, false, truncated)
+    )
+      return setResult(out, ENC_UTF_16LE, -1, 1, 99);
+  }
+  return setResult(out, -1, -1, 0, 0);
 };
 
 export const init = (): void => {
   if (initialized) return;
   buildModel();
-  buildUtf8Dfa();
   buildMbcs();
   for (let q = 0; q < 60; q++) EXP2_INT[q] = 2 ** -q;
   for (let j = 0; j < 256; j++) EXP2_FRAC[j] = 2 ** (-j / 256);
@@ -161,48 +185,56 @@ const scoreStatistical = (
   poolHi: number,
   firstHigh: number,
   truncated: boolean,
+  words: Int32Array,
+  head: number,
   out: Result,
 ): Result => {
   resetCandidates();
-  let h0 = 0;
-  let h1 = 0;
-  let h2 = 0;
-  let h3 = 0;
+  hmask.fill(0);
   for (let j = 0; j < nH; j++) {
     const b = actH[j];
-    const bit = 1 << (b & 31);
-    if (b < 32) h0 |= bit;
-    else if (b < 64) h1 |= bit;
-    else if (b < 96) h2 |= bit;
-    else h3 |= bit;
+    hmask[b >> 5] |= 1 << (b & 31);
   }
-  const select = (cnt: number, off: number, invalid: Int32Array, order: Int32Array): number => {
-    let k = 0;
-    for (let e = 0; e < cnt; e++) {
-      if (!inPool(poolLo, poolHi, off + e)) continue;
-      const hits =
-        (h0 & invalid[e * 4]) |
-        (h1 & invalid[e * 4 + 1]) |
-        (h2 & invalid[e * 4 + 2]) |
-        (h3 & invalid[e * 4 + 3]);
-      if (hits === 0) order[k++] = e;
-    }
-    return k;
-  };
-  const mv = select(NUM_MBCS, MBCS_OFFSET, MBCS_INVALID, mbcsOrder);
-  const nv = select(NUM_SBCS, SBCS_OFFSET, SBCS_INVALID, sbcsOrder);
+  const mv = selectValid(NUM_MBCS, MBCS_OFFSET, MBCS_INVALID, mbcsOrder, poolLo, poolHi);
+  const nv = selectValid(NUM_SBCS, SBCS_OFFSET, SBCS_INVALID, sbcsOrder, poolLo, poolHi);
   const highTotal = n - asciiTotal;
   if (highTotal * 4 < n) {
     if (nv > 0) scoreSbcs(nv, n);
-    const alive = mbcsPrefix(mv, data, n, highTotal, firstHigh, truncated);
-    mbcsComplete(alive, alive, data, n, highTotal, truncated);
+    const alive = mbcsPrefix(mv, data, n, highTotal, firstHigh, truncated, words, head);
+    mbcsComplete(alive, alive, data, n, highTotal, truncated, words, head);
   } else {
-    let alive = mbcsPrefix(mv, data, n, highTotal, firstHigh, truncated);
-    alive = mbcsComplete(alive, 1, data, n, highTotal, truncated);
+    let alive = mbcsPrefix(mv, data, n, highTotal, firstHigh, truncated, words, head);
+    alive = mbcsComplete(alive, 1, data, n, highTotal, truncated, words, head);
     if (nv > 0) scoreSbcs(nv, n);
-    mbcsComplete(alive, alive, data, n, highTotal, truncated);
+    mbcsComplete(alive, alive, data, n, highTotal, truncated, words, head);
   }
   return finish(out);
+};
+
+// Writes the pool members whose invalid-byte mask misses every present high byte into order.
+const selectValid = (
+  cnt: number,
+  off: number,
+  invalid: Int32Array,
+  order: Int32Array,
+  poolLo: number,
+  poolHi: number,
+): number => {
+  const h0 = hmask[0];
+  const h1 = hmask[1];
+  const h2 = hmask[2];
+  const h3 = hmask[3];
+  let k = 0;
+  for (let e = 0; e < cnt; e++) {
+    if (!inPool(poolLo, poolHi, off + e)) continue;
+    const hits =
+      (h0 & invalid[e * 4]) |
+      (h1 & invalid[e * 4 + 1]) |
+      (h2 & invalid[e * 4 + 2]) |
+      (h3 & invalid[e * 4 + 3]);
+    if (hits === 0) order[k++] = e;
+  }
+  return k;
 };
 
 const finish = (out: Result): Result => {
@@ -261,6 +293,10 @@ const setResult = (
 const BAD_C0 = 0xf7ff01fe;
 const SO_SI = (1 << 0x0e) | (1 << 0x0f);
 const ESC = 1 << 0x1b;
+const IS_LE = new Uint8Array(Uint16Array.of(1).buffer)[0] === 1;
+const WORDS_MIN = 32;
+const NO_WORDS = new Int32Array(0);
+const hmask = new Int32Array(4);
 const EXP2_INT = new Float64Array(60);
 const EXP2_FRAC = new Float64Array(256);
 const candList = new Int32Array(NUM_ENC);
