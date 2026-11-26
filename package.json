@@ -1,6 +1,6 @@
 {
   "name": "@cgiosy/chardet",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Zero-dependency Sparse Naive Bayes character encoding detector",
   "type": "module",
   "license": "MIT",
