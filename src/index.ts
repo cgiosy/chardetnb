@@ -45,6 +45,27 @@ const pairOff = I32(32);
 const pairW = new Int16Array(420 * 128);
 const WMAXT = new Int16Array(128 * 32);
 const GMAX = I32(128);
+const PRIOR = I32(47);
+const TLD_BOOST = 12288;
+const EARLY_MARGIN = 15360;
+// 2-letter TLD -> region-group index (`tld[0] tld[1] grp`, grp = 65 + id).
+// Unlike exp4/5 this selects *encodings*, not a language: boosting lang=hu
+// also boosted windows-1252(hu) (91 losses) and lang=zh-Hant boosted GB18030
+// over Big5 for `tld=tw`.
+const TLD_MAP =
+  "jpAkrBcnCtwDhkDmoDgrEilF"
+  + "thGvnHtrIhuJplJczJskJhrJ"
+  + "siJroJltKlvKeeKruLbyLrsL"
+  + "mkLuaMbgNarOegOsaOirOaeO"
+  + "iqOsyOdePfrPesPitPptPnlP"
+  + "sePnoPdkPfiPisPusPukPgbP"
+  + "auPcaPbrPmxP";
+// Per-group encoding ids, packed as `charCodeAt - 40`; the group lengths
+// live in TLD_GRPN the same way. Decoded on demand into ENCB.
+const TLD_GRPD =
+  "12.34/506;CE<?HD=@8GQOA>"
+  + "I9JAI>A9F:B7S";
+const TLD_GRPN = "++*)**))**+-+**+";
 
 const HKD0 = I32(2560);
 const HD1 = I32(2560);
@@ -61,6 +82,8 @@ const candLang = I32(47);
 const candLL = new Float64Array(47);
 const EXP2 = new Float64Array(316);
 const mbcsSt = new Float64Array(48);
+const mbcsTailCut = I32(6);
+const mbcsBad = I32(6);
 const mbcsOrder = I32(6);
 const sbcsOrder = I32(32);
 const langHint = I32(16);
@@ -68,6 +91,8 @@ const bucket = I32(33);
 const tmpB = I32(128);
 const tmpC = I32(128);
 const ubound32 = I32(32);
+const ENCB = I32(47);
+const tldDirty = I32(8);
 
 let initialized = false;
 let asciiDirty = false;
@@ -78,9 +103,19 @@ let scanCtl = 0;
 let wordCtl = 0;
 let nH = 0;
 let asciiTotal = 0;
-let candMask0 = 0;
-let candMask1 = 0;
+let cm0 = 0;
+let cm1 = 0;
 let bestLL = -Infinity;
+let tldN = 0;
+let adjPen = 0;
+let curFirst = 0;
+let curData: Uint8Array = new Uint8Array(0);
+let curWords: Int32Array = NO_WORDS;
+let curHead = 0;
+let gkBest = 0;
+let gkLang = -1;
+let curDense = false;
+let noiseLimit = 4;
 let secondLL = -Infinity;
 let mbcsLang = -1;
 
@@ -91,7 +126,8 @@ export const detect = (
   poolLo = POOL47_LO,
   poolHi = POOL47_HI,
   sampleLimit = 0,
-): Result => detectInto(data, poolLo, poolHi, sampleLimit, newResult());
+  tld = "",
+): Result => detectInto(data, poolLo, poolHi, sampleLimit, newResult(), tld);
 
 export const detectInto = (
   data: Uint8Array,
@@ -99,8 +135,28 @@ export const detectInto = (
   poolHi: number,
   sampleLimit: number,
   out: Result,
+  tld = "",
 ): Result => {
   if (!initialized) init();
+  for (let i = 0; i < tldN; i++) ENCB[tldDirty[i]] = 0;
+  tldN = 0;
+  if (tld.length >= 2) {
+    const c0 = tld.charCodeAt(0);
+    const c1 = tld.charCodeAt(1);
+    for (let p = 0; p < TLD_MAP.length; p = (p + 3) | 0)
+      if (TLD_MAP.charCodeAt(p) === c0 && TLD_MAP.charCodeAt(p + 1) === c1) {
+        const g = TLD_MAP.charCodeAt(p + 2) - 65;
+        let off = 0;
+        for (let k = 0; k < g; k++) off = (off + TLD_GRPN.charCodeAt(k) - 40) | 0;
+        const cnt = TLD_GRPN.charCodeAt(g) - 40;
+        for (let k = 0; k < cnt; k++) {
+          const e = TLD_GRPD.charCodeAt(off + k) - 40;
+          ENCB[e] = TLD_BOOST;
+          tldDirty[tldN++] = e;
+        }
+        break;
+      }
+  }
   const len = data.length;
   if (len === 0) return setResult(out, -1);
   const n = sampleLimit > 0 && len > sampleLimit ? sampleLimit : len;
@@ -118,16 +174,19 @@ export const detectInto = (
     IS_LE && n >= 32
       ? new Int32Array(data.buffer, data.byteOffset + head, (n - head) >>> 2)
       : NO_WORDS;
+  cm0 = cm1 = 0;
+  hmask.fill(0);
+  bestLL = secondLL = -Infinity;
   const firstHigh = asciiPrefix(data, n, words, head);
   let controls = scanCtl;
   if (firstHigh < n) {
     if (inPool(poolLo, poolHi, 1) && utf8Scan(data, firstHigh, n, truncated, words, head)) {
       controls |= scanCtl;
-      if (controls & 1) return detectNul(data, n, poolLo, poolHi, truncated, out);
-      return controls & ~15872 ? setResult(out, -1) : ok(out, 1);
+      if (!(controls & 1)) return controls & ~15872 ? setResult(out, -1) : ok(out, 1);
+    } else {
+      countHigh(data, firstHigh, n, words, head);
+      controls |= compactHistogram(n);
     }
-    countHigh(data, firstHigh, n, words, head);
-    controls |= compactHistogram(n);
   } else {
     nH = 0;
     asciiTotal = n;
@@ -144,26 +203,41 @@ export const detectInto = (
   }
   if (controls & ~15872) return setResult(out, -1);
 
-  candMask0 = candMask1 = 0;
-  bestLL = secondLL = -Infinity;
-  hmask.fill(0);
-  for (let j = 0; j < nH; j++) {
-    const b = actH[j];
-    hmask[b >> 5] |= 1 << (b & 31);
-  }
-  const mv = selectValid(6, 9, MBCS_INVALID, mbcsOrder, poolLo, poolHi);
-  const nv = selectValid(32, 15, SBCS_INVALID, sbcsOrder, poolLo, poolHi);
+  // Pass 1: strict. selectValid keeps the zero-overhead `(b0|b1|b2|b3)===0`
+  // mask test and every SCANNER bails on the first invalid byte (noiseLimit 0).
+  const mv = selectValid(6, 9, MBCS_INVALID, mbcsOrder, poolLo, poolHi, false);
+  const nv = selectValid(32, 15, SBCS_INVALID, sbcsOrder, poolLo, poolHi, false);
   curN = n;
   curTrunc = truncated;
   curHigh = n - asciiTotal;
+  // Feature C: ASCII/high adjacency for short inputs only (1 MiB path untouched).
+  // Only worth scanning when a non-Latin SBCS model can actually be penalised.
+  // Feature C is computed lazily inside scoreSbcs, at the first non-Latin
+  // candidate: Latin-only documents never pay for the scan.
+  curData = data;
+  curFirst = firstHigh;
+  curWords = words;
+  curHead = head;
+  adjPen = n <= 4096 && curHigh >= 2 && nv > 0 ? -1 : 0;
   const dense = curHigh * 4 >= n;
+  curDense = dense;
+  noiseLimit = 0;
   if (!dense && nv > 0) scoreSbcs(nv, n);
   let alive = mbcsPrefix(mv, data, firstHigh, words, head);
   if (dense) {
-    alive = mbcsComplete(alive, 1, data, words, head);
+    alive = mbcsComplete(alive, 1, data, words, head, n > 16384 ? firstHigh + 16384 : n);
     if (nv > 0) scoreSbcs(nv, n);
   }
   mbcsComplete(alive, alive, data, words, head);
+  // Pass 2: cold tolerant fallback. Only pay for it when pass 1 is either
+  // completely empty or has no UTF-8/MBCS winner AND the surviving SBCS
+  // score is suspiciously poor (corrupted UTF-8/MBCS bytes rarely look like
+  // any single-byte text).
+  if (
+    (cm0 | cm1) === 0 ||
+    ((cm0 & 0x7e00) === 0 && curHigh >= 16 && bestLL < curHigh * -1600)
+  )
+    tolerantPass(data, firstHigh, words, head, poolLo, poolHi, n, truncated);
   return finish(out);
 };
 
@@ -233,7 +307,10 @@ const skipAscii = (data: Uint8Array, words: Int32Array, j: number, head: number)
       const w = words[j + k];
       if (((w | (w - LO20) | (w + LO01)) & HI) === 0) continue;
       if ((w & HI) !== 0) return j + k;
-      ctlWord(data, w, (head + ((j + k) << 2)) | 0);
+      for (let p = head + ((j + k) << 2), e = p + 4; p < e; p++) {
+        const b = data[p];
+        if (b < 0x20 || b === 0x7f) wordCtl |= 1 << (b & 31);
+      }
     }
     j += 4;
   }
@@ -241,17 +318,12 @@ const skipAscii = (data: Uint8Array, words: Int32Array, j: number, head: number)
     const w = words[j];
     if (((w | (w - LO20) | (w + LO01)) & HI) === 0) continue;
     if ((w & HI) !== 0) return j;
-    ctlWord(data, w, (head + (j << 2)) | 0);
-  }
-  return wn;
-};
-
-const ctlWord = (data: Uint8Array, w: number, p: number): void => {
-  if ((((~(w + 0x60606060) & (~(w + 0x77777777) | (w + 0x72727272))) | (w + LO01)) & HI) !== 0)
-    for (let k = p; k < p + 4; k = (k + 1) | 0) {
-      const b = data[k];
+    for (let p = head + (j << 2), e = p + 4; p < e; p++) {
+      const b = data[p];
       if (b < 0x20 || b === 0x7f) wordCtl |= 1 << (b & 31);
     }
+  }
+  return wn;
 };
 
 const utf8Slow = (data: Uint8Array, i: number, n: number, truncated: boolean): number => {
@@ -277,6 +349,33 @@ const utf8Slow = (data: Uint8Array, i: number, n: number, truncated: boolean): n
   return b3 >= 0x80 && b3 <= ((b1 & 15) === 15 && b2 === 0xbf ? 0xbd : 0xbf) ? i + 1 : -1;
 };
 
+// Cold path: reuses utf8Slow (-1 = invalid, n = truncated tail) so the 2/3/4
+// byte validation rules exist only once.
+const utf8TolerantScan = (data: Uint8Array, i: number, n: number, truncated: boolean): number => {
+  let validMb = 0;
+  let bad = 0;
+  i = i | 0;
+  n = n | 0;
+  while (i < n) {
+    const b = data[i];
+    if (b < 0x80) {
+      if (b < 0x20 ? b < 9 || b > 13 : b === 0x7f) return -1;
+      i++;
+      continue;
+    }
+    const j = utf8Slow(data, i, n, truncated);
+    if (j < 0) {
+      if (++bad > 4) return -1;
+      i++;
+      continue;
+    }
+    validMb++;
+    if (j >= n) break;
+    i = j;
+  }
+  return bad >= 1 && validMb >= 8 && validMb >= bad * 8 ? bad : -1;
+};
+
 const utf8Scan = (
   data: Uint8Array,
   i: number,
@@ -289,6 +388,7 @@ const utf8Scan = (
   n = n | 0;
   const safeEnd = (n - 3) | 0;
   let ctl = 0;
+  let hasMb = false;
   wordCtl = 0;
   while (i < safeEnd) {
     let b = data[i];
@@ -304,6 +404,7 @@ const utf8Scan = (
         if (((data[i + 1] ^ 0x80) | (data[i + 2] ^ 0x80)) >= 0x40) return false;
         i += 3;
       } while (i < safeEnd && (b = data[i]) >= 0xe1 && b <= 0xec);
+      hasMb = true;
       continue;
     }
     if (b < 0xe0) {
@@ -312,6 +413,7 @@ const utf8Scan = (
         if ((data[i + 1] & 0xc0) !== 0x80) return false;
         i += 2;
       } while (i < safeEnd && (b = data[i]) >= 0xc2 && b < 0xe0);
+      hasMb = true;
       continue;
     }
     if (b < 0xf0) {
@@ -322,8 +424,8 @@ const utf8Scan = (
       const b2 = data[i + 2];
       if (b2 < 0x80 || b2 > (b === 0xef && b1 === 0xbf ? 0xbc : 0xbf)) return false;
       i += 3;
-    } else {
-      if (b > 0xf4) return false;
+      hasMb = true;
+    } else if (b <= 0xf4) {
       const b1 = data[i + 1];
       if (b1 < (b === 0xf0 ? 0x90 : 0x80) || b1 > (b === 0xf4 ? 0x8f : 0xbf)) return false;
       const b2 = data[i + 2];
@@ -331,15 +433,17 @@ const utf8Scan = (
       const b3 = data[i + 3];
       if (b3 < 0x80 || b3 > ((b1 & 15) === 15 && b2 === 0xbf ? 0xbd : 0xbf)) return false;
       i += 4;
-    }
+      hasMb = true;
+    } else return false;
   }
+  const tail = truncated || hasMb;
   while (i < n) {
     const b = data[i];
     if (b < 0x80) {
       if (b < 0x20 || b === 0x7f) ctl |= 1 << (b & 31);
       i++;
     } else {
-      i = utf8Slow(data, i, n, truncated);
+      i = utf8Slow(data, i, n, tail);
       if (i < 0) return false;
     }
   }
@@ -358,21 +462,19 @@ const validUtf = (
   if (e < 0 || !inPool(poolLo, poolHi, e)) return false;
   const dv = new DataView(data.buffer, data.byteOffset, len);
   const le = (e & 1) !== 0;
-  const okCp = (cp: number): boolean =>
-    cp < 0x7f
-      ? cp >= 0x20 || (cp >= 0x09 && cp <= 0x0d)
-      : cp > 0x9f && (cp < 0xd800 || (cp > 0xf8ff && cp <= 0x10ffff && cp !== 0xfffd && (cp & 0xfffe) !== 0xfffe));
-  if (e > 3) {
-    for (let i = 0; i < len; i += 4) if (!okCp(dv.getUint32(i, le))) return false;
-    return true;
-  }
-  for (let i = 0; i < len; i += 2) {
-    const u = dv.getUint16(i, le);
-    if (u >= 0xd800 && u <= 0xdbff) {
+  const w = e > 3;
+  for (let i = 0; i < len; i += w ? 4 : 2) {
+    let u = w ? dv.getUint32(i, le) : dv.getUint16(i, le);
+    if (!w && u >= 0xd800 && u <= 0xdbff) {
       if (i + 2 >= len) return truncated;
-      const u2 = dv.getUint16((i += 2), le);
-      if (u2 < 0xdc00 || u2 > 0xdfff) return false;
-    } else if (!okCp(u)) return false;
+      u = dv.getUint16((i += 2), le);
+      if (u < 0xdc00 || u > 0xdfff) return false;
+    } else if (
+      !(u < 0x7f
+        ? u >= 0x20 || (u >= 9 && u <= 13)
+        : u > 0x9f && (u < 0xd800 || (u > 0xf8ff && u <= 0x10ffff && u !== 0xfffd && (u & 0xfffe) !== 0xfffe)))
+    )
+      return false;
   }
   return true;
 };
@@ -389,16 +491,13 @@ const detectNul = (
   if ((n32 & 3) === 0 && n32 >= 4)
     for (const e of [4, 5]) if (validUtf(data, n32, e, poolLo, poolHi, false)) return ok(out, e);
   const n16 = truncated ? n & ~1 : n;
-  if ((n16 & 1) === 0 && n16 >= 2) {
-    let even = 0, odd = 0;
-    for (let i = 0; i < n16; i += 2) {
-      if (!data[i]) even++;
-      if (!data[i + 1]) odd++;
-    }
-    const e = even > odd * 2 ? 2 : odd > even * 2 ? 3 : -1;
-    if (validUtf(data, n16, e, poolLo, poolHi, truncated)) return ok(out, e);
+  let even = 0, odd = 0;
+  for (let i = 0; (n16 & 1) === 0 && i < n16; i += 2) {
+    if (!data[i]) even++;
+    if (!data[i + 1]) odd++;
   }
-  return setResult(out, -1);
+  const e = even > odd * 2 ? 2 : odd > even * 2 ? 3 : -1;
+  return validUtf(data, n16, e, poolLo, poolHi, truncated) ? ok(out, e) : setResult(out, -1);
 };
 
 const detectIso2022 = (data: Uint8Array, len: number, poolLo: number, poolHi: number): number => {
@@ -569,8 +668,10 @@ const compactHistogram = (n: number): number => {
       if (c === 0) continue;
       hist[b] = 0;
       actH[h] = b - 0x80;
-      cntH32[h++] = c | 0;
-      high += c >>> 0;
+      cntH32[h] = c;
+      hmask[(b - 0x80) >> 5] |= 1 << (b & 31);
+      high += c;
+      h++;
     }
   }
   nH = h;
@@ -579,8 +680,8 @@ const compactHistogram = (n: number): number => {
 };
 
 const addCandidate = (encId: number, ll: number, lang: number): void => {
-  if (encId >= 15) candMask0 |= 1 << (encId - 15);
-  else candMask1 |= 1 << (encId - 9);
+  if (encId < 32) cm0 |= 1 << encId;
+  else cm1 |= 1 << (encId - 32);
   candLL[encId] = ll;
   candLang[encId] = lang;
   if (ll > bestLL) {
@@ -600,6 +701,7 @@ const selectValid = (
   order: Int32Array,
   poolLo: number,
   poolHi: number,
+  soft: boolean,
 ): number => {
   const h0 = hmask[0];
   const h1 = hmask[1];
@@ -608,14 +710,21 @@ const selectValid = (
   let k = 0;
   for (let e = 0; e < cnt; e++) {
     if (!inPool(poolLo, poolHi, off + e)) continue;
-    if (
-      ((h0 & invalid[e * 4]) |
-        (h1 & invalid[e * 4 + 1]) |
-        (h2 & invalid[e * 4 + 2]) |
-        (h3 & invalid[e * 4 + 3])) ===
-      0
-    )
+    const b0 = h0 & invalid[e * 4];
+    const b1 = h1 & invalid[e * 4 + 1];
+    const b2 = h2 & invalid[e * 4 + 2];
+    const b3 = h3 & invalid[e * 4 + 3];
+    if ((b0 | b1 | b2 | b3) === 0) {
       order[k++] = e;
+      continue;
+    }
+    if (!soft) continue;
+    let bad = 0;
+    for (let j = 0; j < nH && bad <= 4; j = (j + 1) | 0) {
+      const b = actH[j];
+      if ((((hmask[b >> 5] & invalid[e * 4 + (b >> 5)]) >>> (b & 31)) & 1) !== 0) bad += cntH32[j];
+    }
+    if (bad <= 4) order[k++] = e;
   }
   return k;
 };
@@ -626,10 +735,9 @@ const finish = (out: Result): Result => {
   let second = -Infinity;
   let denom = 0;
   for (let pass = 0; pass < 2; pass++) {
-    for (let g = 0; g < 2; g++) {
-      const off = g ? 9 : 15;
-      for (let m = g ? candMask1 : candMask0; m !== 0; m &= m - 1) {
-        const id = off + (31 - Math.clz32(m & -m));
+    for (let hi = 0; hi < 2; hi++) {
+      for (let m = hi ? cm1 : cm0; m !== 0; m &= m - 1) {
+        const id = (hi << 5) + 31 - Math.clz32(m & -m);
         const ll = candLL[id];
         if (pass === 0) {
           if (best < 0 || ll > candLL[best] || (ll === candLL[best] && CANON_RANK[id] < CANON_RANK[best]))
@@ -691,7 +799,9 @@ const scoreSbcs = (nv: number, n: number): void => {
   if (t0 > -Infinity) {
     let u = 0;
     for (let j = 0; j < nH; j = (j + 1) | 0) u = (u + cntH32[j] * GMAX[actH[j]]) | 0;
-    if (u < t0) return;
+    // every TLD boost is the same constant, so the best possible addition is
+    // simply TLD_BOOST when a hint is active (keeps the bound sound).
+    if (u + (tldN !== 0 ? TLD_BOOST : 0) < t0) return;
   }
 
   for (let e0 = 0; e0 < 32; e0 = (e0 + 8) | 0) {
@@ -715,14 +825,14 @@ const scoreSbcs = (nv: number, n: number): void => {
       u6 = (u6 + c * WMAXT[base + 6]) | 0;
       u7 = (u7 + c * WMAXT[base + 7]) | 0;
     }
-    ubound32[e0] = u0;
-    ubound32[e0 + 1] = u1;
-    ubound32[e0 + 2] = u2;
-    ubound32[e0 + 3] = u3;
-    ubound32[e0 + 4] = u4;
-    ubound32[e0 + 5] = u5;
-    ubound32[e0 + 6] = u6;
-    ubound32[e0 + 7] = u7;
+    ubound32[e0] = u0 + PRIOR[15 + e0] + ENCB[15 + e0];
+    ubound32[e0 + 1] = u1 + PRIOR[15 + e0 + 1] + ENCB[15 + e0 + 1];
+    ubound32[e0 + 2] = u2 + PRIOR[15 + e0 + 2] + ENCB[15 + e0 + 2];
+    ubound32[e0 + 3] = u3 + PRIOR[15 + e0 + 3] + ENCB[15 + e0 + 3];
+    ubound32[e0 + 4] = u4 + PRIOR[15 + e0 + 4] + ENCB[15 + e0 + 4];
+    ubound32[e0 + 5] = u5 + PRIOR[15 + e0 + 5] + ENCB[15 + e0 + 5];
+    ubound32[e0 + 6] = u6 + PRIOR[15 + e0 + 6] + ENCB[15 + e0 + 6];
+    ubound32[e0 + 7] = u7 + PRIOR[15 + e0 + 7] + ENCB[15 + e0 + 7];
   }
   for (let a = 1; a < nv; a++) {
     const e = sbcsOrder[a];
@@ -746,6 +856,7 @@ const scoreSbcs = (nv: number, n: number): void => {
     if (ue < t) break;
     let eBest = -Infinity;
     let eLang = -1;
+    const pe = PRIOR[15 + e];
     if (prevE >= 0 && ue === ubound32[prevE] && sameOnPresent(e, prevE)) {
       eBest = prevBest;
       eLang = prevLang;
@@ -757,7 +868,7 @@ const scoreSbcs = (nv: number, n: number): void => {
       const poff = pairOff[e] - first;
       let l = langHint[s] >= 0 ? langHint[s] : first;
       for (let k = 0; k < count; k++, l = l + 1 === last ? first : l + 1) {
-        const thr = eBest > t ? eBest : t;
+        const thr = (eBest > t ? eBest : t) - pe;
         const pw = ((poff + l) * 128) | 0;
         let v = 0;
         let j = 0;
@@ -780,8 +891,76 @@ const scoreSbcs = (nv: number, n: number): void => {
       prevBest = eBest;
       prevLang = eLang;
     }
-    if (eLang >= 0 && eBest >= t) addCandidate(15 + e, eBest, eLang);
+    if (adjPen < 0 && SBCS_SCRIPT[e] !== 0 && eLang >= 0) {
+      // Feature C: isolated high bytes flanked only by ASCII letters in a short
+      // snippet are far more likely to be an accented Latin letter than a
+      // Cyrillic/Greek/Hebrew/Arabic/Thai letter, so penalise those models.
+      let ai = 0;
+      let ah = 0;
+      let i = curFirst;
+      const wn = curWords.length;
+      while (i < n && ah === 0 && ai <= 16) {
+        i = skipAsciiRun(curData, i - 1, curHead, curWords, wn, n);
+        if (i >= n) break;
+        const p = curData[i - 1];
+        const q = curData[i + 1];
+        if ((p | q) >= 0x80) ah = 1;
+        else if (((p | 32) - 97) >>> 0 < 26 || ((q | 32) - 97) >>> 0 < 26) ai++;
+        i++;
+      }
+      adjPen = ah === 0 && ai >= 2 ? ai * 1024 : 0;
+    }
+    if (adjPen > 0 && SBCS_SCRIPT[e] >= 1 && eLang >= 0) eBest -= adjPen;
+    // e is the SBCS model index: 4 = ISO-8859-7, 12 = windows-1253.
+    if ((e === 4 || e === 12) && greekFold(e, t) && gkBest > eBest) {
+      eBest = gkBest;
+      eLang = gkLang;
+    }
+    const full = eBest + pe + ENCB[15 + e];
+    if (eLang >= 0 && full >= t) addCandidate(15 + e, full, eLang);
   }
+};
+
+// Feature A: ALL-CAPS Greek. ISO-8859-7/windows-1253 uppercase Greek lives at
+// 0xC1..0xD9, lowercase at 0xE1..0xF9, so an all-caps Greek document scores as
+// noise and loses to KOI8-U. When there is no lowercase Greek at all and at
+// least 3 uppercase Greek bytes, re-score those bytes with their lowercase
+// weight (minus 64 = 0.25 bit uppercase tie-break) and keep the max.
+// KOI8-R/KOI8-U put lowercase Cyrillic at 0xE1..0xF9 as well, so a genuine
+// KOI8 file always has a non-zero lowercase count and never folds.
+const greekFold = (e: number, t: number): boolean => {
+  let lo = 0;
+  let up = 0;
+  for (let j = 0; j < nH; j = (j + 1) | 0) {
+    const a = actH[j];
+    if (a >= 0x61 && a <= 0x79) lo += cntH32[j];
+    else if (a >= 0x41 && a <= 0x59) up += cntH32[j];
+  }
+  if (lo !== 0 || up < 3) return false;
+  const s = SBCS_SCRIPT[e];
+  const poff = pairOff[e] - SCRIPT_META[s];
+  let bl = -1;
+  let bv = -Infinity;
+  for (let k = 0, n = SCRIPT_META[s + 6]; k < n; k++) {
+    const pw = ((poff + SCRIPT_META[s] + k) * 128) | 0;
+    let v = 0;
+    for (let j = 0; j < nH && v >= t; j = (j + 1) | 0) {
+      const a = actH[j];
+      v =
+        (v +
+          cntH32[j] *
+            (a >= 0x41 && a <= 0x59 ? pairW[pw + a + 0x20] - 64 : pairW[pw + a])) |
+        0;
+    }
+    if (v >= t && v > bv) {
+      bv = v;
+      bl = SCRIPT_META[s] + k;
+    }
+  }
+  if (bl < 0) return false;
+  gkBest = bv;
+  gkLang = bl;
+  return true;
 };
 
 const scoreSbcsF64 = (nv: number): void => {
@@ -789,19 +968,57 @@ const scoreSbcsF64 = (nv: number): void => {
     const e = sbcsOrder[a];
     const t = pruneThreshold();
     const s = SBCS_SCRIPT[e];
+    const pe = PRIOR[15 + e] + ENCB[15 + e];
     let eBest = -Infinity;
     let eLang = -1;
     let pw = pairOff[e] * 128;
     for (let l = SCRIPT_META[s], end = l + SCRIPT_META[s + 6]; l < end; l++, pw += 128) {
-      const thr = eBest > t ? eBest : t;
+      const thr = (eBest > t ? eBest : t) - pe;
       let v = 0;
       for (let j = 0; j < nH && v >= thr; j++) v += cntH32[j] * pairW[pw + actH[j]];
-      if (v > eBest && v >= t) {
+      if (v > eBest && v >= thr) {
         eBest = v;
         eLang = l;
       }
     }
-    if (eLang >= 0) addCandidate(15 + e, eBest, eLang);
+    if (eLang >= 0) addCandidate(15 + e, eBest + pe, eLang);
+  }
+};
+
+const tolerantPass = (
+  data: Uint8Array,
+  firstHigh: number,
+  words: Int32Array,
+  head: number,
+  poolLo: number,
+  poolHi: number,
+  n: number,
+  truncated: boolean,
+): void => {
+  noiseLimit = 4;
+  if (inPool(poolLo, poolHi, 1)) {
+    const bad = utf8TolerantScan(data, firstHigh, n, truncated);
+    if (bad > 0) addCandidate(1, bad * -13230, -1);
+  }
+  for (let m = 0; m < 48; m++) mbcsSt[m] = 0;
+  for (let m = 0; m < 6; m++) mbcsTailCut[m] = mbcsBad[m] = 0;
+  const mv = selectValid(6, 9, MBCS_INVALID, mbcsOrder, poolLo, poolHi, true);
+  if (mv === 0) return;
+  const alive = mbcsPrefix(mv, data, firstHigh, words, head);
+  mbcsComplete(alive, alive, data, words, head);
+};
+
+// Record a finished MBCS model. EUC-KR (m=2) also hands its score to the
+// CP949 alias, which is either pre-resumed or invalidated (`kill`).
+const mbcsAdd = (m: number, ll: number, from: number, end: number, kill: number): void => {
+  const bad = mbcsBad[m];
+  const ok = bad === 0 || charsOf(m) >= bad * 8;
+  let alias = -1;
+  if (m === 2) for (let k = from; k < end; k++) if (mbcsOrder[k] === 3) { alias = k; break; }
+  if (ok && !(bad > 0 && alias >= 0)) addCandidate(9 + m, ll, mbcsLang);
+  if (alias >= 0) {
+    if (kill) mbcsOrder[alias] = -1;
+    if (ok) addCandidate(12, ll, mbcsLang);
   }
 };
 
@@ -819,32 +1036,35 @@ const mbcsPrefix = (
     const m = mbcsOrder[a];
     const o = m * 8;
     for (let p = 0; p < 6; p++) mbcsSt[o + p] = 0;
+    mbcsTailCut[m] = 0;
+    mbcsBad[m] = 0;
     const t = pruneThreshold();
     if (t > -Infinity && mbcsBound(m) < t) continue;
-    if (m === 3 && (euckrAlive || candMask1 & 4)) {
-      if (candMask1 & 4) {
+    if (m === 3 && mbcsBad[2] === 0 && (euckrAlive || cm0 & 0x800)) {
+      // CP949 is a superset of EUC-KR: reuse the EUC-KR result or its state.
+      if (cm0 & 0x800) {
         addCandidate(12, candLL[11], candLang[11]);
         continue;
       }
       for (let p = 0; p < 7; p++) mbcsSt[24 + p] = mbcsSt[16 + p];
+      mbcsBad[3] = mbcsBad[2];
+      mbcsTailCut[3] = mbcsTailCut[2];
       mbcsBound(3);
     } else {
       const i = SCANNERS[m](data, firstHigh, stop, curN, curTrunc, words, head);
       if (i < 0) continue;
       const ub = mbcsBound(m);
       if (i >= curN) {
-        addCandidate(9 + m, ub, mbcsLang);
+        mbcsAdd(m, ub, a + 1, mv, 0);
         continue;
       }
       if (m === 2) euckrAlive = true;
       mbcsSt[o + 6] = i;
     }
+    // keep the live models ordered by their score-per-high-byte rate
     const rate = mbcsSt[o + 7];
     let k = alive++;
-    while (k > 0 && mbcsSt[mbcsOrder[k - 1] * 8 + 7] < rate) {
-      mbcsOrder[k] = mbcsOrder[k - 1];
-      k--;
-    }
+    while (k > 0 && mbcsSt[mbcsOrder[k - 1] * 8 + 7] < rate) mbcsOrder[k] = mbcsOrder[--k];
     mbcsOrder[k] = m;
   }
   return alive;
@@ -856,8 +1076,10 @@ const mbcsComplete = (
   data: Uint8Array,
   words: Int32Array,
   head: number,
+  seedEnd = curN,
 ): number => {
   let done = 0;
+  let kept = false;
   while (done < count && done < alive) {
     const m = mbcsOrder[done++];
     if (m < 0) continue;
@@ -867,25 +1089,63 @@ const mbcsComplete = (
     const chunk = t === -Infinity ? 65536 : curHigh * 4 < curN ? 16384 : 1024;
     const scan = SCANNERS[m];
     for (;;) {
-      i = scan(data, i, curN - i > chunk ? i + chunk : curN, curN, curTrunc, words, head);
-      if (i < 0) break;
-      if (i >= curN) {
-        const ub = mbcsBound(m);
-        addCandidate(9 + m, ub, mbcsLang);
-        if (m === 2) {
-          for (let k = done; k < alive; k++) {
-            if (mbcsOrder[k] === 3) {
-              mbcsOrder[k] = -1;
-              addCandidate(12, ub, mbcsLang);
-              break;
+      // Large dense MBCS: once a clean run has been seen, the per-high-byte
+      // rate gives a linear extrapolation that is far more stable than the
+      // partial bound, so trust it when this model is far ahead.
+      if (
+        curDense &&
+        curN > 16384 &&
+        mbcsBad[m] === 0 &&
+        2 * mbcsSt[m * 8 + 1] + mbcsSt[m * 8 + 5] - mbcsSt[m * 8 + 4] >= 8192 &&
+        seedEnd >= curN &&
+        i > 0 &&
+        i < curN &&
+        curN - i > 8192
+      ) {
+        const extrap = mbcsSt[m * 8 + 7] * curHigh;
+        if (bestLL === -Infinity || extrap - bestLL >= EARLY_MARGIN) {
+          let contender = false;
+          for (let k = done; k < alive && !contender; k++) {
+            const o2 = mbcsOrder[k];
+            if (o2 >= 0) {
+              const r2 = mbcsSt[o2 * 8 + 7];
+              contender = r2 >= 0 || r2 * curHigh > extrap - EARLY_MARGIN;
             }
           }
+          if (!contender) {
+            mbcsAdd(m, extrap, done, alive, 1);
+            break;
+          }
         }
+      }
+      const stop0 = curN - i > chunk ? i + chunk : curN;
+      i = scan(data, i, stop0 < seedEnd ? stop0 : seedEnd, curN, curTrunc, words, head);
+      if (i < 0) break;
+      if (i >= curN) {
+        mbcsAdd(m, mbcsBound(m), done, alive, 1);
         break;
       }
+      if (i >= seedEnd) {
+        mbcsSt[m * 8 + 6] = i;
+        kept = true;
+        break;
+      }
+      const rate = mbcsSt[m * 8 + 7];
       if (t > -Infinity && mbcsBound(m) < t) break;
+      if (
+        curDense &&
+        curN > 16384 &&
+        mbcsBad[m] === 0 &&
+        rate < 0 &&
+        bestLL !== -Infinity &&
+        2 * mbcsSt[m * 8 + 1] + mbcsSt[m * 8 + 5] - mbcsSt[m * 8 + 4] >= 8192 &&
+        rate * curHigh < bestLL - EARLY_MARGIN
+      )
+        break;
     }
+    if (kept) break;
   }
+  if (kept) return alive;
   for (let a = done; a < alive; a++) mbcsOrder[a - done] = mbcsOrder[a];
   return alive - done;
 };
@@ -895,24 +1155,55 @@ const mbcsBound = (m: number): number => {
   const nat = mbcsSt[o];
   const chars = mbcsSt[o + 1];
   const trail = mbcsSt[o + 4];
-  const highDone = 2 * chars + mbcsSt[o + 5] - trail;
-  const remEff = Math.max(0, curHigh - highDone - (curTrunc ? (m === 1 || m === 4 ? 2 : 1) : 0));
-  const remTrail = Math.min(remEff, asciiTotal - trail);
+  const bad = mbcsBad[m];
+  const hi = 2 * chars + mbcsSt[o + 5] + bad - trail;
+  const margin = curTrunc ? (m === 1 || m === 4 ? 2 : 1) : mbcsTailCut[m];
+  const rem = curHigh - hi - margin > 0 ? curHigh - hi - margin : 0;
+  const t2 = asciiTotal - trail;
+  const m2 = t2 > 0 ? t2 : 0;
+  const remT = rem < m2 ? rem : m2;
+  const fixed = (chars - nat) * -6615 + trail * 1280 - bad * 13230 + ENCB[9 + m];
   let best = -Infinity;
-  let bestScanned = -Infinity;
-  for (let k = m < 4 ? m : 2 * m - 4, j = 0; j < (m < 4 ? 1 : 2); j++, k++) {
-    const sc = mbcsSt[o + 2 + j] + nat * REST[MODEL_LANG[k]] + (chars - nat) * -6615 + trail * 1280;
+  let scanned = -Infinity;
+  for (let j = 0, k = m < 4 ? m : 2 * m - 4, n = m < 4 ? 1 : 2; j < n; j++, k++) {
+    const sc = mbcsSt[o + 2 + j] + nat * REST[MODEL_LANG[k]] + fixed;
     const hh = MBCS_NEG_RATE2[k];
     const at = MBCS_NEG_RATE2[8 + k];
-    const v = sc - (at < hh ? remTrail * at + (remEff - remTrail) * hh : remEff * hh) * 0.5;
+    const v = sc - (at < hh ? remT * at + (rem - remT) * hh : rem * hh) * 0.5;
     if (v > best) {
       best = v;
       mbcsLang = MODEL_LANG[k];
     }
-    if (sc > bestScanned) bestScanned = sc;
+    if (sc > scanned) scanned = sc;
   }
-  mbcsSt[o + 7] = highDone > 0 ? bestScanned / highDone : 0;
+  mbcsSt[o + 7] = hi > 0 ? scanned / hi : 0;
   return best;
+};
+
+const charsOf = (m: number): number => mbcsSt[m * 8 + 1];
+
+
+// Advance from an ASCII byte to the next byte >= 0x80 (or to `safeStop`),
+// reusing the 4-byte SWAR word test. Exactly the loop body the scanners used
+// to inline six times.
+const skipAsciiRun = (
+  data: Uint8Array,
+  i: number,
+  head: number,
+  words: Int32Array,
+  wend: number,
+  safeStop: number,
+): number => {
+  for (;;) {
+    i = (i + 1) | 0;
+    if (i >= safeStop) return i;
+    if (data[i] >= 0x80) return i;
+    if (((i - head) & 3) === 0) {
+      const j = (i - head) >> 2;
+      if (j < wend && (words[j] & 0x80808080) === 0)
+        i = skipAsciiWords(words, j + 1, wend, head) - 1;
+    }
+  }
 };
 
 const skipAsciiWords = (words: Int32Array, j: number, end: number, head: number): number => {
@@ -941,6 +1232,11 @@ const addState = (
   mbcsSt[o + 5] += extra;
 };
 
+// True when a dangling lead/trail byte at the end of the sample may be a cut
+// multi-byte sequence rather than garbage.
+// Six scanners, one shape. Every model shares the same loop skeleton (and the
+// same ASCII skip / trail-class / hash step), so DEFLATE only has to store the
+// skeleton once; the per-model lead and trail rules are the only differences.
 const SCANNERS: ((data: Uint8Array, i: number, stop: number, n: number, truncated: boolean, words: Int32Array, head: number) => number)[] = [
   (data, i, stop, n, truncated, words, head) => {
     i = i | 0;
@@ -949,42 +1245,61 @@ const SCANNERS: ((data: Uint8Array, i: number, stop: number, n: number, truncate
     const safeStop = (stop < n ? stop : n - 1) | 0;
     const wend = words.length !== 0 ? (stop - head) >> 2 : 0;
     const mul = HMUL[0];
-    let nat = 0, chars = 0, d0 = 0, trail = 0, extra = 0;
+    let nat = 0, chars = 0, d0 = 0, d1 = 0, trail = 0, extra = 0, bad = mbcsBad[0];
     while (i < safeStop) {
       const b0 = data[i];
       if (b0 < 0x80) {
-        i++;
-        if (((i - head) & 3) === 0) {
-          const j = (i - head) >> 2;
-          if (j < wend && (words[j] & 0x80808080) === 0) i = skipAsciiWords(words, j + 1, wend, head);
-        }
+        i = skipAsciiRun(data, i, head, words, wend, safeStop);
         continue;
       }
       const nw = NATW[b0];
       if (nw === 0) {
-        if (b0 >= 0xa1 && b0 <= 0xdf) { nat++; chars++; extra--; i++; continue; }
-        return -1;
+        if (b0 >= 0xa1 && b0 <= 0xdf) {
+          nat++;
+          chars++;
+          extra--;
+          i++;
+          continue;
+        }
+        if (++bad > noiseLimit) return -1;
+        i++;
+        continue;
       }
       const b1 = data[i + 1];
-      const tc = TRAIL_CLASS[b1];
-      if ((tc & 1) === 0) return -1;
+      const tc = TRAIL_CLASS[0 + b1];
+      if ((tc & 1) === 0) {
+        if (++bad > noiseLimit) return -1;
+        i++;
+        continue;
+      }
       trail += tc >>> 1;
       nat += (((b1 - (nw & 255)) | ((nw >>> 8) - b1)) >>> 31) ^ 1;
       chars++;
       const code = (b0 << 8) | b1;
-      const kv = HKD0[(Math.imul(code, mul) >>> 23) | 0];
-      d0 = (d0 + (((kv << 16) >> 16) & ((((kv >>> 16) ^ code) - 1) >> 31))) | 0;
+      const h = 0 + (Math.imul(code, mul) >>> 23);
+      const kv = HKD0[h];
+      const hit = (((kv >>> 16) ^ code) - 1) >> 31;
+      d0 = (d0 + (((kv << 16) >> 16) & hit)) | 0;
       i += 2;
     }
     if (i < stop) {
       const b0 = data[i];
       if (b0 >= 0x80) {
-        if (NATW[b0] !== 0) { if (!truncated) return -1; extra++; }
-        else if (b0 >= 0xa1 && b0 <= 0xdf) { nat++; chars++; extra--; }
-        else return -1;
+        const cut = truncated || (stop >= n && n >= 64 && mbcsSt[1] + chars > 0);
+        if (NATW[b0] !== 0) {
+          if (cut) {
+            extra++;
+            if (!truncated) mbcsTailCut[0] = 1;
+          } else if (++bad > noiseLimit) return -1;
+        } else if (b0 >= 0xa1 && b0 <= 0xdf) {
+          nat++;
+          chars++;
+          extra--;
+        } else if (++bad > noiseLimit) return -1;
       }
       i = n;
     }
+    mbcsBad[0] = bad;
     addState(0, nat, chars, d0, 0, trail, extra);
     return i;
   },
@@ -995,49 +1310,85 @@ const SCANNERS: ((data: Uint8Array, i: number, stop: number, n: number, truncate
     const safeStop = (stop < n ? stop : n - 1) | 0;
     const wend = words.length !== 0 ? (stop - head) >> 2 : 0;
     const mul = HMUL[1];
-    let nat = 0, chars = 0, d0 = 0, extra = 0;
+    let nat = 0, chars = 0, d0 = 0, d1 = 0, trail = 0, extra = 0, bad = mbcsBad[1];
     while (i < safeStop) {
       const b0 = data[i];
       if (b0 < 0x80) {
-        i++;
-        if (((i - head) & 3) === 0) {
-          const j = (i - head) >> 2;
-          if (j < wend && (words[j] & 0x80808080) === 0) i = skipAsciiWords(words, j + 1, wend, head);
-        }
+        i = skipAsciiRun(data, i, head, words, wend, safeStop);
         continue;
       }
-      if (b0 >= 0xa1 && b0 <= 0xfe) {
-        const b1 = data[i + 1];
-        if (b1 < 0xa1 || b1 > 0xfe) return -1;
-        const nw = NATW[256 + b0];
-        nat += (((b1 - (nw & 255)) | ((nw >>> 8) - b1)) >>> 31) ^ 1;
-        chars++;
-        const code = (b0 << 8) | b1;
-        const kv = HKD0[(512 + (Math.imul(code, mul) >>> 23)) | 0];
-        d0 = (d0 + (((kv << 16) >> 16) & ((((kv >>> 16) ^ code) - 1) >> 31))) | 0;
-        i += 2;
-      } else if (b0 === 0x8e) {
-        const b1 = data[i + 1];
-        if (b1 < 0xa1 || b1 > 0xdf) return -1;
-        nat++; chars++; i += 2;
-      } else if (b0 === 0x8f) {
-        if (i + 2 >= n) {
-          if (!truncated || data[i + 1] < 0xa1 || data[i + 1] > 0xfe) return -1;
-          extra += n - i; i = n; break;
+      if (b0 < 0xa1 || b0 > 0xfe) {
+        if (b0 === 0x8e) {
+          const b1 = data[i + 1];
+          if (b1 < 0xa1 || b1 > 0xdf) {
+            if (++bad > noiseLimit) return -1;
+            i++;
+            continue;
+          }
+          nat++;
+          chars++;
+          i += 2;
+          continue;
         }
-        const b1 = data[i + 1], b2 = data[i + 2];
-        if (b1 < 0xa1 || b1 > 0xfe || b2 < 0xa1 || b2 > 0xfe) return -1;
-        nat += (0xaf - b1) >>> 31; chars++; extra++; i += 3;
-      } else return -1;
+        if (b0 === 0x8f) {
+          if (i + 2 >= n) {
+            if (!(truncated || (stop >= n && n >= 64 && mbcsSt[9] + chars > 0)) || data[i + 1] < 0xa1 || data[i + 1] > 0xfe) {
+              if (++bad > noiseLimit) return -1;
+              i = n;
+              break;
+            }
+            if (!truncated) mbcsTailCut[1] = n - i;
+            extra += n - i;
+            i = n;
+            break;
+          }
+          const b1 = data[i + 1];
+          const b2 = data[i + 2];
+          if (b1 < 0xa1 || b1 > 0xfe || b2 < 0xa1 || b2 > 0xfe) {
+            if (++bad > noiseLimit) return -1;
+            i++;
+            continue;
+          }
+          nat += (0xaf - b1) >>> 31;
+          chars++;
+          extra++;
+          i += 3;
+          continue;
+        }
+        if (++bad > noiseLimit) return -1;
+        i++;
+        continue;
+      }
+      const nw = NATW[256 + b0];
+      const b1 = data[i + 1];
+      const tc = TRAIL_CLASS[512 + b1];
+      if ((tc & 1) === 0) {
+        if (++bad > noiseLimit) return -1;
+        i++;
+        continue;
+      }
+      trail += tc >>> 1;
+      nat += (((b1 - (nw & 255)) | ((nw >>> 8) - b1)) >>> 31) ^ 1;
+      chars++;
+      const code = (b0 << 8) | b1;
+      const h = 512 + (Math.imul(code, mul) >>> 23);
+      const kv = HKD0[h];
+      const hit = (((kv >>> 16) ^ code) - 1) >> 31;
+      d0 = (d0 + (((kv << 16) >> 16) & hit)) | 0;
+      i += 2;
     }
     if (i < stop) {
       const b0 = data[i];
       if (b0 >= 0x80) {
-        if (!truncated || !((b0 >= 0xa1 && b0 <= 0xfe) || b0 === 0x8e || b0 === 0x8f)) return -1;
-        extra++;
+        const cut = truncated || (stop >= n && n >= 64 && mbcsSt[9] + chars > 0);
+        if (cut && ((b0 >= 0xa1 && b0 <= 0xfe) || b0 === 0x8e || b0 === 0x8f)) {
+          extra++;
+          if (!truncated) mbcsTailCut[1] = 1;
+        } else if (++bad > noiseLimit) return -1;
       }
       i = n;
     }
+    mbcsBad[1] = bad;
     addState(1, nat, chars, d0, 0, 0, extra);
     return i;
   },
@@ -1048,33 +1399,48 @@ const SCANNERS: ((data: Uint8Array, i: number, stop: number, n: number, truncate
     const safeStop = (stop < n ? stop : n - 1) | 0;
     const wend = words.length !== 0 ? (stop - head) >> 2 : 0;
     const mul = HMUL[2];
-    let nat = 0, chars = 0, d0 = 0, extra = 0;
+    let nat = 0, chars = 0, d0 = 0, d1 = 0, trail = 0, extra = 0, bad = mbcsBad[2];
     while (i < safeStop) {
       const b0 = data[i];
       if (b0 < 0x80) {
-        i++;
-        if (((i - head) & 3) === 0) {
-          const j = (i - head) >> 2;
-          if (j < wend && (words[j] & 0x80808080) === 0) i = skipAsciiWords(words, j + 1, wend, head);
-        }
+        i = skipAsciiRun(data, i, head, words, wend, safeStop);
         continue;
       }
-      if (b0 < 0xa1 || b0 === 0xc9 || b0 >= 0xfe) return -1;
-      const b1 = data[i + 1];
-      if (b1 < 0xa1 || b1 > 0xfe) return -1;
+      if (b0 < 0xa1 || b0 === 0xc9 || b0 >= 0xfe) {
+        if (++bad > noiseLimit) return -1;
+        i++;
+        continue;
+      }
       const nw = NATW[512 + b0];
+      const b1 = data[i + 1];
+      const tc = TRAIL_CLASS[512 + b1];
+      if ((tc & 1) === 0) {
+        if (++bad > noiseLimit) return -1;
+        i++;
+        continue;
+      }
+      trail += tc >>> 1;
       nat += (((b1 - (nw & 255)) | ((nw >>> 8) - b1)) >>> 31) ^ 1;
       chars++;
       const code = (b0 << 8) | b1;
-      const kv = HKD0[(1024 + (Math.imul(code, mul) >>> 23)) | 0];
-      d0 = (d0 + (((kv << 16) >> 16) & ((((kv >>> 16) ^ code) - 1) >> 31))) | 0;
+      const h = 1024 + (Math.imul(code, mul) >>> 23);
+      const kv = HKD0[h];
+      const hit = (((kv >>> 16) ^ code) - 1) >> 31;
+      d0 = (d0 + (((kv << 16) >> 16) & hit)) | 0;
       i += 2;
     }
     if (i < stop) {
       const b0 = data[i];
-      if (b0 >= 0x80) { if (!truncated || b0 < 0xa1 || b0 === 0xc9 || b0 >= 0xfe) return -1; extra++; }
+      if (b0 >= 0x80) {
+        const cut = truncated || (stop >= n && n >= 64 && mbcsSt[17] + chars > 0);
+        if (cut && b0 >= 0xa1 && b0 !== 0xc9 && b0 < 0xfe) {
+          extra++;
+          if (!truncated) mbcsTailCut[2] = 1;
+        } else if (++bad > noiseLimit) return -1;
+      }
       i = n;
     }
+    mbcsBad[2] = bad;
     addState(2, nat, chars, d0, 0, 0, extra);
     return i;
   },
@@ -1085,35 +1451,48 @@ const SCANNERS: ((data: Uint8Array, i: number, stop: number, n: number, truncate
     const safeStop = (stop < n ? stop : n - 1) | 0;
     const wend = words.length !== 0 ? (stop - head) >> 2 : 0;
     const mul = HMUL[2];
-    let nat = 0, chars = 0, d0 = 0, trail = 0, extra = 0;
+    let nat = 0, chars = 0, d0 = 0, d1 = 0, trail = 0, extra = 0, bad = mbcsBad[3];
     while (i < safeStop) {
       const b0 = data[i];
       if (b0 < 0x80) {
-        i++;
-        if (((i - head) & 3) === 0) {
-          const j = (i - head) >> 2;
-          if (j < wend && (words[j] & 0x80808080) === 0) i = skipAsciiWords(words, j + 1, wend, head);
-        }
+        i = skipAsciiRun(data, i, head, words, wend, safeStop);
         continue;
       }
-      if (b0 < 0x81 || b0 === 0xc9 || b0 >= 0xfe) return -1;
-      const b1 = data[i + 1];
-      const tc = TRAIL_CLASS[(b0 <= 0xc6 ? 768 : 512) + b1];
-      if ((tc & 1) === 0) return -1;
-      trail += tc >>> 1;
+      if (b0 < 0x81 || b0 === 0xc9 || b0 >= 0xfe) {
+        if (++bad > noiseLimit) return -1;
+        i++;
+        continue;
+      }
       const nw = NATW[768 + b0];
+      const b1 = data[i + 1];
+      const tc = TRAIL_CLASS[512 + (b0 < 0xc7 ? 256 : 0) + b1];
+      if ((tc & 1) === 0) {
+        if (++bad > noiseLimit) return -1;
+        i++;
+        continue;
+      }
+      trail += tc >>> 1;
       nat += (((b1 - (nw & 255)) | ((nw >>> 8) - b1)) >>> 31) ^ 1;
       chars++;
       const code = (b0 << 8) | b1;
-      const kv = HKD0[(1024 + (Math.imul(code, mul) >>> 23)) | 0];
-      d0 = (d0 + (((kv << 16) >> 16) & ((((kv >>> 16) ^ code) - 1) >> 31))) | 0;
+      const h = 1024 + (Math.imul(code, mul) >>> 23);
+      const kv = HKD0[h];
+      const hit = (((kv >>> 16) ^ code) - 1) >> 31;
+      d0 = (d0 + (((kv << 16) >> 16) & hit)) | 0;
       i += 2;
     }
     if (i < stop) {
       const b0 = data[i];
-      if (b0 >= 0x80) { if (!truncated || b0 < 0x81 || b0 === 0xc9 || b0 >= 0xfe) return -1; extra++; }
+      if (b0 >= 0x80) {
+        const cut = truncated || (stop >= n && n >= 64 && mbcsSt[25] + chars > 0);
+        if (cut && b0 >= 0x81 && b0 !== 0xc9 && b0 < 0xfe) {
+          extra++;
+          if (!truncated) mbcsTailCut[3] = 1;
+        } else if (++bad > noiseLimit) return -1;
+      }
       i = n;
     }
+    mbcsBad[3] = bad;
     addState(3, nat, chars, d0, 0, trail, extra);
     return i;
   },
@@ -1124,38 +1503,61 @@ const SCANNERS: ((data: Uint8Array, i: number, stop: number, n: number, truncate
     const safeStop = (stop < n ? stop : n - 1) | 0;
     const wend = words.length !== 0 ? (stop - head) >> 2 : 0;
     const mul = HMUL[3];
-    let nat = 0, chars = 0, d0 = 0, d1 = 0, trail = 0, extra = 0;
+    let nat = 0, chars = 0, d0 = 0, d1 = 0, trail = 0, extra = 0, bad = mbcsBad[4];
     while (i < safeStop) {
       const b0 = data[i];
       if (b0 < 0x80) {
-        i++;
-        if (((i - head) & 3) === 0) {
-          const j = (i - head) >> 2;
-          if (j < wend && (words[j] & 0x80808080) === 0) i = skipAsciiWords(words, j + 1, wend, head);
-        }
+        i = skipAsciiRun(data, i, head, words, wend, safeStop);
         continue;
       }
       const nw = NATW[1024 + b0];
-      if (nw === 0) return -1;
+      if (nw === 0) {
+        if (++bad > noiseLimit) return -1;
+        i++;
+        continue;
+      }
       const b1 = data[i + 1];
       if (b1 < 0x40) {
-        if (b1 < 0x30 || b1 > 0x39) return -1;
-        if (i + 3 >= n) {
-          if (!truncated || (i + 2 < n && (data[i + 2] < 0x81 || data[i + 2] > 0xfe))) return -1;
-          extra += i + 2 < n ? 2 : 1; i = n; break;
+        if (b1 < 0x30 || b1 > 0x39) {
+          if (++bad > noiseLimit) return -1;
+          i++;
+          continue;
         }
-        const b2 = data[i + 2], b3 = data[i + 3];
-        if (b2 < 0x81 || b2 > 0xfe || b3 < 0x30 || b3 > 0x39) return -1;
-        chars++; trail += 2; extra += 2; i += 4;
+        if (i + 3 >= n) {
+          if (!(truncated || (stop >= n && n >= 64 && mbcsSt[33] + chars > 0)) || (i + 2 < n && (data[i + 2] < 0x81 || data[i + 2] > 0xfe))) {
+            if (++bad > noiseLimit) return -1;
+            i = n;
+            break;
+          }
+          if (!truncated) mbcsTailCut[4] = n - i;
+          extra += i + 2 < n ? 2 : 1;
+          i = n;
+          break;
+        }
+        const b2 = data[i + 2];
+        const b3 = data[i + 3];
+        if (b2 < 0x81 || b2 > 0xfe || b3 < 0x30 || b3 > 0x39) {
+          if (++bad > noiseLimit) return -1;
+          i++;
+          continue;
+        }
+        chars++;
+        trail += 2;
+        extra += 2;
+        i += 4;
         continue;
       }
       const tc = TRAIL_CLASS[1024 + b1];
-      if ((tc & 1) === 0) return -1;
+      if ((tc & 1) === 0) {
+        if (++bad > noiseLimit) return -1;
+        i++;
+        continue;
+      }
       trail += tc >>> 1;
       nat += (((b1 - (nw & 255)) | ((nw >>> 8) - b1)) >>> 31) ^ 1;
       chars++;
       const code = (b0 << 8) | b1;
-      const h = (1536 + (Math.imul(code, mul) >>> 23)) | 0;
+      const h = 1536 + (Math.imul(code, mul) >>> 23);
       const kv = HKD0[h];
       const hit = (((kv >>> 16) ^ code) - 1) >> 31;
       d0 = (d0 + (((kv << 16) >> 16) & hit)) | 0;
@@ -1164,9 +1566,16 @@ const SCANNERS: ((data: Uint8Array, i: number, stop: number, n: number, truncate
     }
     if (i < stop) {
       const b0 = data[i];
-      if (b0 >= 0x80) { if (!truncated || NATW[1024 + b0] === 0) return -1; extra++; }
+      if (b0 >= 0x80) {
+        const cut = truncated || (stop >= n && n >= 64 && mbcsSt[33] + chars > 0);
+        if (cut && NATW[1024 + b0] !== 0) {
+          extra++;
+          if (!truncated) mbcsTailCut[4] = 1;
+        } else if (++bad > noiseLimit) return -1;
+      }
       i = n;
     }
+    mbcsBad[4] = bad;
     addState(4, nat, chars, d0, d1, trail, extra);
     return i;
   },
@@ -1177,28 +1586,36 @@ const SCANNERS: ((data: Uint8Array, i: number, stop: number, n: number, truncate
     const safeStop = (stop < n ? stop : n - 1) | 0;
     const wend = words.length !== 0 ? (stop - head) >> 2 : 0;
     const mul = HMUL[4];
-    let nat = 0, chars = 0, d0 = 0, d1 = 0, trail = 0, extra = 0;
+    let nat = 0, chars = 0, d0 = 0, d1 = 0, trail = 0, extra = 0, bad = mbcsBad[5];
     while (i < safeStop) {
       const b0 = data[i];
       if (b0 < 0x80) {
-        i++;
-        if (((i - head) & 3) === 0) {
-          const j = (i - head) >> 2;
-          if (j < wend && (words[j] & 0x80808080) === 0) i = skipAsciiWords(words, j + 1, wend, head);
-        }
+        i = skipAsciiRun(data, i, head, words, wend, safeStop);
         continue;
       }
       const nw = NATW[1280 + b0];
-      if (nw === 0) return -1;
+      if (nw === 0) {
+        if (++bad > noiseLimit) return -1;
+        i++;
+        continue;
+      }
       const b1 = data[i + 1];
       const tc = TRAIL_CLASS[1280 + b1];
-      if ((tc & 1) === 0) return -1;
+      if ((tc & 1) === 0) {
+        if (++bad > noiseLimit) return -1;
+        i++;
+        continue;
+      }
       trail += tc >>> 1;
       nat += (((b1 - (nw & 255)) | ((nw >>> 8) - b1)) >>> 31) ^ 1;
       chars++;
       const code = (b0 << 8) | b1;
-      if (code >= 0xc6a1 && code <= 0xc8fe) return -1;
-      const h = (2048 + (Math.imul(code, mul) >>> 23)) | 0;
+      if (code >= 0xc6a1 && code <= 0xc8fe) {
+        if (++bad > noiseLimit) return -1;
+        i++;
+        continue;
+      }
+      const h = 2048 + (Math.imul(code, mul) >>> 23);
       const kv = HKD0[h];
       const hit = (((kv >>> 16) ^ code) - 1) >> 31;
       d0 = (d0 + (((kv << 16) >> 16) & hit)) | 0;
@@ -1207,9 +1624,16 @@ const SCANNERS: ((data: Uint8Array, i: number, stop: number, n: number, truncate
     }
     if (i < stop) {
       const b0 = data[i];
-      if (b0 >= 0x80) { if (!truncated || NATW[1280 + b0] === 0) return -1; extra++; }
+      if (b0 >= 0x80) {
+        const cut = truncated || (stop >= n && n >= 64 && mbcsSt[41] + chars > 0);
+        if (cut && NATW[1280 + b0] !== 0) {
+          extra++;
+          if (!truncated) mbcsTailCut[5] = 1;
+        } else if (++bad > noiseLimit) return -1;
+      }
       i = n;
     }
+    mbcsBad[5] = bad;
     addState(5, nat, chars, d0, d1, trail, extra);
     return i;
   },
@@ -1293,10 +1717,32 @@ export const init = (): void => {
     const base = (p >> 7) * 256 + 128 + (p & 127);
     NATW.fill(natVals[natRunInts[k + 2]], base, base + natRunInts[k + 1]);
   }
+  // Feature B: treat fullwidth punctuation/alphanumerics and Hangul Jamo as
+  // natural (REST[lang] instead of the flat -6615 "not in any model" penalty).
+  // Ranges already covered by natRunInts keep their value.
+  const natRun = (base: number, b0: number, t0: number, t1: number): void => {
+    const cur = NATW[base + b0];
+    const c0 = cur & 255, c1 = cur >>> 8;
+    if (cur !== 0 && c0 <= t0 && c1 >= t1) return;
+    NATW[base + b0] = ((cur !== 0 && c1 > t1 ? c1 : t1) << 8) | (cur !== 0 && c0 < t0 ? c0 : t0);
+  };
+  natRun(0, 0x82, 0x4f, 0x9a); // Shift_JIS fullwidth alphanumerics 0x824F..0x829A
+  natRun(1280, 0xa2, 0x40, 0xaf); // Big5 fullwidth punctuation 0xA140..0xA2AF
+  natRun(512, 0xa2, 0xa1, 0xfe); // EUC-KR fullwidth punctuation 0xA1A1..0xA3FE
+  natRun(512, 0xa3, 0xa1, 0xfe);
+  natRun(512, 0xa4, 0xa1, 0xd3); // EUC-KR Hangul Jamo 0xA4A1..0xA4D3
+  natRun(768, 0xa2, 0xa1, 0xfe); // CP949
+  natRun(768, 0xa3, 0xa1, 0xfe);
+  natRun(768, 0xa4, 0x41, 0xd3);
+  natRun(1024, 0xa2, 0xa1, 0xfe); // GB18030 fullwidth punctuation 0xA1A1..0xA3FE
   for (let k = 0, p = 0; k < trRunInts.length; k += 3) {
     p += trRunInts[k];
     TRAIL_CLASS.fill(trRunInts[k + 2], p, p + trRunInts[k + 1]);
   }
+  // Weak universal encoding priors (fixed point 1/256 bit). Indexed by
+  // ENC_NAMES id; only ids 34..46 are non-zero, packed as (value/256 + 7).
+  const pr = "1177575787611";
+  for (let i = 0; i < 13; i++) PRIOR[34 + i] = (pr.charCodeAt(i) - 55) * 256;
   for (let m = 0; m < 6; m++) MBCS_INVALID[m * 4 + 3] = m ? 1 << 31 : 7 << 29;
   MBCS_INVALID[4] = ~0xc000;
   MBCS_INVALID[5] = MBCS_INVALID[9] = MBCS_INVALID[12] = MBCS_INVALID[21] = 1;
@@ -1329,10 +1775,7 @@ export const init = (): void => {
     }
     if (idx) lpOff += codes.length;
   }
-  for (let j = 0; j < 256; j++) {
-    if (j < 60) EXP2[j] = 2 ** -j;
-    EXP2[60 + j] = 2 ** (-j / 256);
-  }
+  for (let j = 0; j < 316; j++) EXP2[j] = j < 60 ? 2 ** -j : 2 ** (-(j - 60) / 256);
   initialized = true;
 };
 
